@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Secret Garden</title>
+<meta name="description" content="A living garden that breathes with real weather, sky, and the moon, with scripture at its heart.">
+<meta name="theme-color" content="#E9F0E2">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Secret Garden">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="icon" href="./icons/favicon.png" type="image/png">
+<link rel="stylesheet" href="./fonts/fonts.css">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<canvas id="scene" aria-hidden="true"></canvas>
+<div class="vignette" aria-hidden="true"></div>
+
+<div class="stage">
+  <header class="topbar">
+    <div class="brand">
+      <h1>Secret <span class="em">Garden</span></h1>
+      <small>a living garden</small>
+    </div>
+    <div class="conditions">
+      <span class="chip-info live"><span id="cond-place">Beaver, PA</span></span>
+      <span class="chip-info"><span class="glyph" id="cond-wx-glyph">&#9728;&#65039;</span><span id="cond-wx-text">Clear</span></span>
+      <span class="chip-info" id="cond-aqi" style="display:none"><span id="cond-aqi-text">Air</span></span>
+      <span class="chip-info" id="cond-iss" style="display:none"><span class="glyph">&#128760;</span><span id="cond-iss-text">ISS</span></span>
+    </div>
+  </header>
+
+  <main class="center">
+    <section class="scripture" id="scripture" aria-live="polite">
+      <p class="verse-text" id="verse-text">&#8220;The light shineth in darkness; and the darkness comprehended it not.&#8221;</p>
+      <p class="verse-ref shimmer-gold-text" id="verse-ref">John 1:5</p>
+      <div class="verse-controls">
+        <button class="icon-btn" id="verse-pause" aria-pressed="false" aria-label="Pause verse rotation">&#10074;&#10074;</button>
+        <button class="icon-btn" id="verse-next" aria-label="Next verse">&#8635;</button>
+      </div>
+    </section>
+  </main>
+
+  <nav class="dock" aria-label="Garden themes">
+    <div class="dock-scroll" id="theme-chips"></div>
+    <button class="icon-btn" id="open-about" aria-label="Settings and about">&#9881;</button>
+  </nav>
+</div>
+
+<div class="sheet-backdrop" id="sheet-backdrop"></div>
+
+<section class="sheet" id="sheet-creator" role="dialog" aria-label="Create a garden">
+  <div class="sheet-head">
+    <h2>Create a <span class="em">garden</span></h2>
+    <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <div class="field">
+    <label>Foliage</label>
+    <div class="swatches" id="foliage-swatches"></div>
+  </div>
+  <div class="field">
+    <label>Blooms</label>
+    <div class="swatches" id="bloom-swatches"></div>
+  </div>
+  <div class="field">
+    <label>Planting density</label>
+    <input type="range" id="density-range" min="15" max="100" value="70">
+  </div>
+  <div class="field">
+    <label>Warmth of light</label>
+    <input type="range" id="warm-range" min="0" max="100" value="50">
+  </div>
+  <div class="field">
+    <label>Air</label>
+    <div class="seg" id="ambient-seg">
+      <button data-v="petals">Falling petals</button>
+      <button data-v="fireflies">Fireflies</button>
+      <button data-v="pollen">Drifting pollen</button>
+      <button data-v="none">Still</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Water</label>
+    <div class="seg" id="water-seg">
+      <button data-v="on">Pond</button>
+      <button data-v="off">None</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Name</label>
+    <input type="text" id="theme-name" class="text-input" placeholder="My Garden" maxlength="28">
+  </div>
+  <div class="row-actions">
+    <button class="btn sheet-close">Cancel</button>
+    <button class="btn primary" id="save-theme">Save garden</button>
+  </div>
+</section>
+
+<section class="sheet" id="sheet-about" role="dialog" aria-label="Settings and about">
+  <div class="sheet-head">
+    <h2>Garden <span class="em">settings</span></h2>
+    <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <div class="field">
+    <label>Location</label>
+    <p class="about"><b id="about-loc">Beaver, PA</b></p>
+    <div class="seg"><button id="use-location">Use my location</button></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <input type="text" id="city-input" class="text-input" placeholder="Search a city" maxlength="60">
+      <button class="btn" id="city-go" style="flex:0 0 auto;max-width:120px">Search</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Preferences</label>
+    <div class="seg">
+      <button id="motion-toggle">Animate scene</button>
+      <button id="rotate-toggle">Rotate verses</button>
+    </div>
+  </div>
+  <div class="field about">
+    <label>About</label>
+    <p>The scene follows the real sky at your location. Tonight the moon is <b id="about-moon">waxing</b>.</p>
+    <p>Live data comes from open sources that need no account: <span class="src">Open-Meteo</span> for weather and air, and a public feed for the <span class="src">space station</span>. The moon phase is computed on the device and works offline.</p>
+    <p>Scripture is the public-domain <b>King James Version</b>, chosen to echo the mood of the garden.</p>
+  </div>
+</section>
+
+<div class="toast" id="toast"></div>
+
+<script src="./verses.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
+

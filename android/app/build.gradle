@@ -1,0 +1,70 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+def signingStoreFile = System.getenv('SIGNING_STORE_FILE')
+def signingStorePassword = System.getenv('SIGNING_STORE_PASSWORD')
+def signingKeyAlias = System.getenv('SIGNING_KEY_ALIAS')
+def signingKeyPassword = System.getenv('SIGNING_KEY_PASSWORD')
+
+android {
+    namespace 'io.github.shaver3josiah.secretgarden'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'io.github.shaver3josiah.secretgarden'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    signingConfigs {
+        if (signingStoreFile) {
+            release {
+                storeFile file(signingStoreFile)
+                storePassword signingStorePassword
+                keyAlias signingKeyAlias
+                keyPassword signingKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingStoreFile ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+tasks.register('syncWebAssets', Copy) {
+    from '../../web'
+    into 'src/main/assets/www'
+}
+
+tasks.named('preBuild').configure {
+    dependsOn 'syncWebAssets'
+}
+
+tasks.named('clean').configure {
+    delete 'src/main/assets/www'
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
+    implementation 'androidx.core:core-splashscreen:1.0.1'
+    implementation 'androidx.activity:activity-ktx:1.9.0'
+}
