@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.SecretGarden" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowBackground">@color/garden_bg</item>
+    </style>
+
+    <style name="Theme.SecretGarden.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/garden_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.SecretGarden</item>
+    </style>
+
+</resources>
