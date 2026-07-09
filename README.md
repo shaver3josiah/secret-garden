@@ -1,6 +1,6 @@
 # Secret Garden
 
-A living garden that breathes with real weather, sky, and the moon, with scripture at its heart. The scene follows the actual sky at your location: sunrise warms the canvas, rain wets the stone archway, wisteria sways with the measured wind, and five paper lanterns ignite at dusk. Verses from the public domain King James Version rotate at the center, chosen to echo the mood of the garden.
+A living garden and river that breathe with real weather, sky, and the moon, with scripture drifting through the clouds. The scene follows the actual sky at your location. A sailing mode turns the ground into a river with a procedural sloop crossing under sun and moon glades; tools cover an hourly rain, wind, and satellite sheet, a geocoded sailing route planner, and her own verses added to the rotation. Verses from the public domain Berean Standard Bible drift across the sky, chosen to echo the mood of the scene.
 
 Live web app: https://shaver3josiah.github.io/secret-garden/
 
@@ -14,7 +14,7 @@ All realtime data comes from open sources that need no account or API key. Weath
 
 The repo is one source tree with two delivery targets.
 
-`web/` is the complete dependency free PWA: one canvas scene, token based CSS with bundled OFL fonts, a service worker for offline shell caching, and the KJV verse set. GitHub Pages serves this folder directly.
+`web/` is the complete dependency free PWA: one canvas scene, token based CSS with bundled OFL fonts, a service worker for offline shell caching, and the BSB verse set. GitHub Pages serves this folder directly.
 
 `android/` is a thin Kotlin shell: a single activity hosting a WebView served through WebViewAssetLoader, with a native geolocation permission bridge, a branded splash screen, and external links handed to the system browser. A Gradle copy task syncs `web/` into the APK assets at build time, so the web app is the single source of truth.
 
@@ -34,4 +34,4 @@ Requires JDK 17 and Android SDK 34. From `android/`, run `gradle wrapper --gradl
 
 ## Provenance
 
-The app mark — a sailboat cradled in a ring of daisies — is original vector art in `design/logo/`. `scripts/render_master.py` rasterizes it with headless Chrome and `scripts/generate_icons.py` composites every icon, splash, and adaptive-launcher size from that master; `scripts/` also holds the font bundler. `design/art-brief.md` records the art direction behind the archway, wisteria, and lantern scene elements, which are original procedural drawing. Fonts are DM Sans and Playfair Display under the SIL Open Font License. Scripture text is the King James Version, public domain. Code is MIT licensed.
+The app mark — a sailboat cradled in a ring of daisies — is original vector art in `design/logo/`. `scripts/render_master.py` rasterizes it with headless Chrome and `scripts/generate_icons.py` composites every icon, splash, and adaptive-launcher size from that master; `scripts/` also holds the font bundler. `design/art-brief.md` records the art direction behind the archway, wisteria, and lantern scene elements, which are original procedural drawing. Fonts are DM Sans and Playfair Display under the SIL Open Font License. Scripture text is the Berean Standard Bible, public domain. Code is MIT licensed.

@@ -3,7 +3,7 @@
 
   const cv = document.getElementById("scene");
   const ctx = cv.getContext("2d");
-  let W = 0, H = 0, DPR = 1, horizonY = 0, T = 0;
+  let W = 0, H = 0, U = 0, DPR = 1, horizonY = 0, T = 0, lastTs = 0;
 
   const KEY = "secret-garden-state";
   function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
@@ -27,14 +27,20 @@
     loc: store.loc || Object.assign({}, DEFAULT_LOC),
     themeId: store.themeId || "secret-garden",
     custom: store.custom || [],
-    settings: Object.assign({ autoRotate: true, motion: true }, store.settings || {}),
-    weather: store.weather || { code: 0, temp: null, cloud: 22, wind: 6, isDay: 1, precip: 0 },
+    customVerses: store.customVerses || [],
+    sail: Object.assign({ on: false, stops: [], speed: 5 }, store.sail || {}),
+    settings: Object.assign({ autoRotate: true, motion: true, skyMode: "real" }, store.settings || {}),
+    weather: store.weather || { code: 0, temp: null, cloud: 22, wind: 6, windDir: 240, isDay: 1, precip: 0 },
+    hourly: store.hourly || null,
     sun: store.sun || { sunrise: 390, sunset: 1200 },
     aqi: store.aqi != null ? store.aqi : null,
     iss: null,
-    mood: "peace",
-    verseIdx: 0,
-    versePaused: false
+    rv: null,
+    curVerse: null,
+    versePaused: false,
+    cycleStart: 0,
+    cycleBase: 0,
+    boatP: 0.18
   };
 
   function motionOn() { return state.settings.motion && !prefersReduced; }
@@ -47,7 +53,7 @@
   }
 
   function persist() {
-    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, settings: state.settings, weather: state.weather, sun: state.sun, aqi: state.aqi });
+    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, sun: state.sun, aqi: state.aqi });
   }
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -70,7 +76,13 @@
     return 2 * R * Math.asin(Math.sqrt(a));
   }
 
-  function nowMin() { const d = new Date(); return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60; }
+  function realNowMin() { const d = new Date(); return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60; }
+  function nowMin() {
+    if (state.settings.skyMode === "cycle" && state.cycleStart) {
+      return (state.cycleBase + ((Date.now() - state.cycleStart) / 150000) * 1440) % 1440;
+    }
+    return realNowMin();
+  }
   function minutesOf(iso) { const t = iso.split("T")[1]; const p = t.split(":"); return (+p[0]) * 60 + (+p[1]); }
 
   function sunAltitude() {
@@ -114,8 +126,7 @@
   function buildScene() {
     const th = activeTheme();
     const r = rng(1337 + Math.round(th.density * 1000));
-    horizonY = H * 0.6;
-    const g = { farRidge: [], midRidge: [], trees: [], bushes: [], grasses: [], flowers: [], pond: null, stars: [], clouds: [] };
+    const g = { farRidge: [], midRidge: [], trees: [], bushes: [], grasses: [], flowers: [], pond: null, stars: [] };
 
     function ridge(base, amp, step, seedShift) {
       const rr = rng(base * 100 + seedShift);
@@ -127,42 +138,44 @@
       }
       return pts;
     }
-    g.farRidge = ridge(H * 0.16, 14, 0.05, 3);
-    g.midRidge = ridge(H * 0.09, 22, 0.04, 9);
+    g.farRidge = ridge(U * 0.2, U * 0.016, 0.05, 3);
+    g.midRidge = ridge(U * 0.11, U * 0.024, 0.04, 9);
 
-    const treeN = Math.round(8 + th.density * 8);
+    const wk = clamp(W / 900, 0.45, 1.6);
+    const treeN = clamp(Math.round((7 + th.density * 8) * wk), 5, 18);
     for (let i = 0; i < treeN; i++) {
-      g.trees.push({ x: (i / treeN + (r() - 0.5) * 0.05) * W, w: H * (0.05 + r() * 0.05), h: H * (0.09 + r() * 0.08), ph: r() * 6.28 });
+      g.trees.push({ x: (i / treeN + (r() - 0.5) * 0.05) * W, w: U * (0.05 + r() * 0.05), h: U * (0.1 + r() * 0.08), ph: r() * 6.28 });
     }
 
-    const bushN = Math.round(6 + th.density * 9);
+    const bushN = clamp(Math.round((5 + th.density * 8) * wk), 4, 16);
     for (let i = 0; i < bushN; i++) {
-      g.bushes.push({ x: (r()) * W, y: horizonY + (H - horizonY) * (0.12 + r() * 0.34), w: H * (0.09 + r() * 0.11), h: H * (0.05 + r() * 0.06), ph: r() * 6.28, c: r() });
+      g.bushes.push({ x: (r()) * W, y: horizonY + (H - horizonY) * (0.12 + r() * 0.34), w: U * (0.09 + r() * 0.1), h: U * (0.05 + r() * 0.055), ph: r() * 6.28, c: r() });
     }
     g.bushes.sort((a, b) => a.y - b.y);
 
-    const grassN = Math.round((70 + th.density * 220) * (Math.min(W, 1200) / 1200));
+    const grassN = Math.round((70 + th.density * 220) * wk);
     for (let i = 0; i < grassN; i++) {
-      g.grasses.push({ x: r() * W * 1.02, base: horizonY + (H - horizonY) * (0.4 + r() * 0.62), len: H * (0.05 + r() * 0.14), w: 1 + r() * 2.2, ph: r() * 6.28, lean: (r() - 0.5) * 0.5 });
+      g.grasses.push({ x: r() * W * 1.02, base: horizonY + (H - horizonY) * (0.4 + r() * 0.62), len: U * (0.05 + r() * 0.12), w: 1 + r() * 2.2, ph: r() * 6.28, lean: (r() - 0.5) * 0.5 });
     }
     g.grasses.sort((a, b) => a.base - b.base);
 
-    const flowerN = Math.round((10 + th.density * 34) * (Math.min(W, 1200) / 1200));
+    const flowerN = clamp(Math.round((12 + th.density * 34) * wk), 8, 60);
     for (let i = 0; i < flowerN; i++) {
-      g.flowers.push({ x: r() * W, base: horizonY + (H - horizonY) * (0.42 + r() * 0.56), h: H * (0.08 + r() * 0.17), ph: r() * 6.28, br: H * (0.012 + r() * 0.016), col: Math.floor(r() * th.bloom.length), petals: 5 + Math.floor(r() * 3), lean: (r() - 0.5) * 0.4 });
+      g.flowers.push({ x: r() * W, base: horizonY + (H - horizonY) * (0.42 + r() * 0.56), h: U * (0.08 + r() * 0.15), ph: r() * 6.28, br: U * (0.012 + r() * 0.014), col: Math.floor(r() * th.bloom.length), petals: 5 + Math.floor(r() * 3), lean: (r() - 0.5) * 0.4 });
     }
     g.flowers.sort((a, b) => a.base - b.base);
 
     if (th.water) {
       const py = horizonY + (H - horizonY) * 0.3;
-      g.pond = { cx: W * (0.5 + (r() - 0.5) * 0.2), cy: py, rx: W * (0.26 + r() * 0.12), ry: (H - horizonY) * 0.12 };
+      g.pond = { cx: W * (0.5 + (r() - 0.5) * 0.2), cy: py, rx: Math.min(W * 0.3, U * 0.36), ry: (H - horizonY) * 0.12 };
     }
 
-    const starN = 90;
+    const starN = clamp(Math.round(90 * wk), 55, 140);
     for (let i = 0; i < starN; i++) g.stars.push({ x: r() * W, y: r() * horizonY * 0.92, r: 0.5 + r() * 1.2, ph: r() * 6.28 });
 
     geo = g;
     initParticles();
+    layoutVerse();
   }
 
   let rain = [], snow = [], petals = [], pollen = [], flies = [], clouds = [];
@@ -174,11 +187,11 @@
     return "clear";
   }
   function initParticles() {
-    const scale = Math.min(W, 1200) / 1200, k = wxKind(), th = activeTheme();
+    const scale = clamp(W / 1100, 0.4, 1.2), k = wxKind(), th = activeTheme();
     const heavy = motionOn() ? 1 : 0.25;
     rain = []; snow = []; petals = []; pollen = []; flies = []; clouds = [];
     const cloudN = clamp(Math.round(2 + state.weather.cloud / 16), 2, 9);
-    for (let i = 0; i < cloudN; i++) clouds.push({ x: Math.random() * W * 1.2 - W * 0.1, y: Math.random() * horizonY * 0.5, s: 0.6 + Math.random() * 1.1, sp: 0.004 + Math.random() * 0.01, op: 0.35 + Math.random() * 0.4 });
+    for (let i = 0; i < cloudN; i++) clouds.push({ x: Math.random() * W * 1.2 - W * 0.1, y: (0.08 + Math.random() * 0.45) * horizonY, s: (0.6 + Math.random() * 1.1) * clamp(U / 700, 0.55, 1.25), sp: 0.004 + Math.random() * 0.01, op: 0.35 + Math.random() * 0.4 });
     if (k === "rain") { const n = Math.round((state.weather.code >= 80 || state.weather.code >= 63 ? 240 : 150) * scale * heavy); for (let i = 0; i < n; i++) rain.push({ x: Math.random() * W, y: Math.random() * H, len: 9 + Math.random() * 14, sp: 7 + Math.random() * 6 }); }
     if (k === "snow") { const n = Math.round(130 * scale * heavy); for (let i = 0; i < n; i++) snow.push({ x: Math.random() * W, y: Math.random() * H, r: 1 + Math.random() * 2.4, sp: 0.6 + Math.random() * 1.1, ph: Math.random() * 6.28 }); }
     if (th.ambient === "petals") { const n = Math.round(20 * scale * heavy); for (let i = 0; i < n; i++) petals.push({ x: Math.random() * W, y: Math.random() * H, r: 3 + Math.random() * 4, sp: 0.5 + Math.random() * 0.9, drift: (Math.random() - 0.5) * 0.6, rot: Math.random() * 6.28, rs: (Math.random() - 0.5) * 0.05, col: th.bloom[Math.floor(Math.random() * th.bloom.length)] }); }
@@ -211,6 +224,9 @@
     g.addColorStop(1, rgb(s.hor));
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, horizonY);
+  }
+
+  function drawGround() {
     const alt = sunAltitude();
     const groundNear = mix(hexToRgb("#3b4a2c"), hexToRgb("#7a935f"), smooth(alt / 0.3));
     const groundFar = mix(hexToRgb("#6f8a55"), hexToRgb("#c3d5b0"), smooth(alt / 0.3));
@@ -265,19 +281,21 @@
     ctx.restore();
   }
 
+  function celestialX(frac) { return W * (0.14 + 0.72 * frac); }
+
   function drawCelestial() {
     const alt = sunAltitude();
     const sunA = clamp(alt / 0.12, 0, 1);
     const moonA = clamp(1 - alt / 0.14, 0, 1) * 0.92;
     if (moonA > 0.02) {
       const nf = nightFrac();
-      const mx = W * (0.14 + 0.72 * nf), my = horizonY - Math.sin(Math.PI * nf) * horizonY * 0.7 + 12;
-      drawMoon(mx, my, Math.max(16, H * 0.045), moonA);
+      const mx = celestialX(nf), my = horizonY - Math.sin(Math.PI * nf) * horizonY * 0.7 + 12;
+      drawMoon(mx, my, Math.max(14, U * 0.05), moonA);
     }
     if (sunA > 0.02) {
       const df = dayFrac();
-      const sx = W * (0.14 + 0.72 * df), sy = horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8;
-      drawSun(sx, sy, Math.max(18, H * 0.05), sunA);
+      const sx = celestialX(df), sy = horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8;
+      drawSun(sx, sy, Math.max(16, U * 0.055), sunA);
     }
   }
 
@@ -329,128 +347,19 @@
     ctx.closePath();
     ctx.fill();
   }
-  function drawTreeline() {
+  function drawTreeline(bankOnly) {
     const th = activeTheme(), nf = clamp(1 - sunAltitude() * 3, 0, 1);
     for (const tr of geo.trees) {
+      if (bankOnly && tr.x > W * 0.2 && tr.x < W * 0.8) continue;
       const sx = motionOn() ? Math.sin(T * 0.0004 + tr.ph) * 4 * windAmp() : 0;
       const c = shade(hexToRgb(th.foliage[0]), -0.12 * nf);
       blob(tr.x + sx, horizonY + 4, tr.w, tr.h, rgb(c));
     }
   }
 
-  let archGeo = null;
-  function buildArch() {
-    const r = rng(4201);
-    const top1 = horizonY - 0.30 * H, top2 = horizonY - 0.27 * H, base = horizonY + 0.05 * H;
-    const x0 = -0.02 * W, x1 = 0.085 * W, x2 = 0.115 * W, x3 = 0.16 * W;
-    const mossSpots = [
-      { x: (x0 + x1) / 2, y: base, s: 1 },
-      { x: (x2 + x3) / 2, y: base, s: 0.9 },
-      { x: (x0 + x1) / 2, y: top1 + 0.05 * H, s: 0.6 },
-      { x: (x2 + x3) / 2, y: top2 + 0.05 * H, s: 0.6 }
-    ];
-    const moss = [];
-    for (let i = 0; i < mossSpots.length; i++) {
-      const m = mossSpots[i];
-      moss.push({ x: m.x + (r() - 0.5) * W * 0.02, y: m.y, w: W * (0.02 + r() * 0.012) * m.s, h: H * (0.014 + r() * 0.008) * m.s, a: 0.5 + r() * 0.2 });
-    }
-    const ivyN = 16;
-    const ivy = [];
-    for (let i = 0; i < ivyN; i++) {
-      let cx, cy;
-      if (i < 7) { cx = lerp(x0, x1, 0.3 + r() * 0.6); cy = lerp(base, top1, i / 7 + r() * 0.08); }
-      else if (i < 14) { cx = lerp(x2, x3, 0.3 + r() * 0.6); cy = lerp(base, top2, (i - 7) / 7 + r() * 0.08); }
-      else { cx = lerp(x1, x2, r()); cy = lerp(top1, top2, r()) - H * (0.02 + r() * 0.02); }
-      ivy.push({ x: cx, y: cy, s: W * (0.008 + r() * 0.006), rot: r() * 6.28, set: r() < 0.5 ? 0 : 1, n: r() < 0.5 ? 2 : 3 });
-    }
-    const tendN = 5;
-    const tendrils = [];
-    for (let i = 0; i < tendN; i++) {
-      tendrils.push({ x: x2, y: lerp(base, top2, (i + 0.5) / tendN), ph: r() * 6.28, len: W * (0.015 + r() * 0.015) });
-    }
-    return { x0: x0, x1: x1, x2: x2, x3: x3, top1: top1, top2: top2, base: base, moss: moss, ivy: ivy, tendrils: tendrils, w: W, h: H };
-  }
-
-  function drawArch() {
-    if (!archGeo || archGeo.w !== W || archGeo.h !== H) archGeo = buildArch();
-    const g = archGeo, th = activeTheme();
-    const nf = clamp(1 - sunAltitude() * 2.6, 0, 1);
-    const wet = wxKind() === "rain";
-    const stoneBase = shade(hexToRgb("#B8AF98"), -0.12 * nf - (wet ? 0.06 : 0));
-    const stoneShadow = shade(hexToRgb("#6E6552"), -0.1 * nf);
-    function pillar(xOuter, xInner, top, taperInner) {
-      const grad = ctx.createLinearGradient(xOuter, 0, xInner, 0);
-      grad.addColorStop(0, rgb(stoneBase));
-      grad.addColorStop(1, rgb(stoneShadow));
-      ctx.fillStyle = grad;
-      const innerTopX = xInner > xOuter ? xInner - taperInner : xInner + taperInner;
-      ctx.beginPath();
-      ctx.moveTo(xOuter, top);
-      ctx.lineTo(innerTopX, top);
-      ctx.lineTo(xInner, g.base);
-      ctx.lineTo(xOuter, g.base);
-      ctx.closePath();
-      ctx.fill();
-    }
-    pillar(g.x0, g.x1, g.top1, W * 0.012);
-    pillar(g.x3, g.x2, g.top2, W * 0.012);
-    const ltx = (g.x0 + g.x1) / 2, lty = g.top1, rtx = (g.x2 + g.x3) / 2, rty = g.top2;
-    const mcx = (ltx + rtx) / 2, mcy = Math.min(lty, rty) - 0.05 * H;
-    const lg = ctx.createLinearGradient(0, mcy, 0, Math.max(lty, rty));
-    lg.addColorStop(0, rgb(stoneBase));
-    lg.addColorStop(1, rgb(stoneShadow));
-    ctx.strokeStyle = lg;
-    ctx.lineWidth = H * 0.045;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(ltx, lty);
-    ctx.quadraticCurveTo(mcx, mcy, rtx, rty);
-    ctx.stroke();
-    if (wet) {
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = "#FFFFFF";
-      ctx.lineWidth = 1;
-      for (let i = 0; i < 4; i++) {
-        const sx = lerp(g.x0, g.x1, i / 4);
-        ctx.beginPath();
-        ctx.moveTo(sx, g.top1);
-        ctx.lineTo(sx + W * 0.01, g.base);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-    }
-    const mossCol = rgb(shade(hexToRgb("#4A5642"), -0.1 * nf));
-    for (const m of g.moss) {
-      ctx.globalAlpha = m.a;
-      blob(m.x, m.y, m.w, m.h, mossCol);
-    }
-    ctx.globalAlpha = 1;
-    for (const iv of g.ivy) {
-      const col = shade(hexToRgb(iv.set === 0 ? th.foliage[0] : th.foliage[1]), -0.12 * nf);
-      ctx.fillStyle = rgb(col);
-      for (let k = 0; k < iv.n; k++) {
-        const ang = iv.rot + k * 2.1;
-        const ex = iv.x + Math.cos(ang) * iv.s * 0.6;
-        const ey = iv.y + Math.sin(ang) * iv.s * 0.6;
-        ctx.beginPath();
-        ctx.ellipse(ex, ey, iv.s, iv.s * 0.55, ang, 0, 6.2832);
-        ctx.fill();
-      }
-    }
-    ctx.strokeStyle = rgb(shade(hexToRgb(th.foliage[0]), -0.12 * nf));
-    ctx.lineWidth = 1.4;
-    for (const t of g.tendrils) {
-      const sway = motionOn() ? Math.sin(T * 0.0006 + t.ph) * windAmp() * H * 0.012 : 0;
-      ctx.beginPath();
-      ctx.moveTo(t.x, t.y);
-      ctx.bezierCurveTo(t.x - t.len * 0.4, t.y - t.len * 0.3 + sway, t.x - t.len * 0.75, t.y + t.len * 0.2 + sway, t.x - t.len, t.y + t.len * 0.4 + sway);
-      ctx.stroke();
-    }
-  }
-
   function drawPond() {
     if (!geo.pond) return;
-    const p = geo.pond, s = skyColors(), alt = sunAltitude();
+    const p = geo.pond, s = skyColors();
     ctx.save();
     ctx.beginPath();
     ctx.ellipse(p.cx, p.cy, p.rx, p.ry, 0, 0, 6.2832);
@@ -530,8 +439,139 @@
     }
   }
 
+  function drawWater() {
+    const s = skyColors(), alt = sunAltitude();
+    const nightK = clamp(1 - alt * 3, 0, 1);
+    const top = mix(mix(s.hor, [110, 138, 148], 0.42), [56, 74, 96], nightK * 0.5);
+    const bot = mix([44, 66, 70], [22, 32, 44], nightK * 0.7);
+    const g = ctx.createLinearGradient(0, horizonY, 0, H);
+    g.addColorStop(0, rgb(top));
+    g.addColorStop(1, rgb(bot));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, horizonY, W, H - horizonY);
+    const frac = isNight() ? nightFrac() : dayFrac();
+    const gx = celestialX(frac);
+    const glow = isNight() ? "rgba(244,240,214," : "rgba(255,242,200,";
+    const ga = isNight() ? 0.16 : 0.13 * clamp(alt / 0.25, 0, 1) + twilight() * 0.14;
+    if (ga > 0.02) {
+      const gl = ctx.createRadialGradient(gx, horizonY + (H - horizonY) * 0.32, 0, gx, horizonY + (H - horizonY) * 0.32, (H - horizonY) * 0.85);
+      gl.addColorStop(0, glow + ga + ")");
+      gl.addColorStop(1, glow + "0)");
+      ctx.fillStyle = gl;
+      ctx.fillRect(gx - U * 0.3, horizonY, U * 0.6, H - horizonY);
+    }
+    ctx.strokeStyle = "rgba(255,255,255,0.28)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 10; i++) {
+      const yy = horizonY + (i + 0.6) / 10.5 * (H - horizonY);
+      const off = motionOn() ? Math.sin(T * 0.0012 + i * 1.7) * (6 + i) : 0;
+      ctx.globalAlpha = 0.32 - i * 0.02;
+      ctx.beginPath();
+      ctx.moveTo(0, yy);
+      ctx.quadraticCurveTo(W * 0.5 + off, yy + 2, W, yy);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBanks() {
+    const th = activeTheme(), nf = clamp(1 - sunAltitude() * 2.6, 0, 1);
+    const deep = shade(hexToRgb(th.foliage[0]), -0.18 - 0.14 * nf);
+    const mid = shade(hexToRgb(th.foliage[1]), -0.08 - 0.12 * nf);
+    const gL = ctx.createLinearGradient(0, horizonY, 0, H);
+    gL.addColorStop(0, rgb(mid)); gL.addColorStop(1, rgb(deep));
+    ctx.fillStyle = gL;
+    ctx.beginPath();
+    ctx.moveTo(0, horizonY + 1);
+    ctx.lineTo(W * 0.2, horizonY + 1);
+    ctx.quadraticCurveTo(W * 0.12, H * 0.75, W * 0.07, H);
+    ctx.lineTo(0, H);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(W, horizonY + 1);
+    ctx.lineTo(W * 0.8, horizonY + 1);
+    ctx.quadraticCurveTo(W * 0.88, H * 0.75, W * 0.93, H);
+    ctx.lineTo(W, H);
+    ctx.closePath(); ctx.fill();
+    for (const b of geo.bushes) {
+      const onLeft = b.x < W * 0.2, onRight = b.x > W * 0.8;
+      if (!onLeft && !onRight) continue;
+      const c = shade(hexToRgb(th.foliage[b.c < 0.5 ? 1 : 0]), -0.14 * nf);
+      blob(b.x, b.y, b.w * 0.8, b.h * 0.8, rgb(c));
+    }
+  }
+
+  function drawBoat() {
+    if (motionOn() && !document.hidden) state.boatP = (state.boatP + (T - lastTs) * (0.9 + windAmp() * 0.5) / 90000) % 1;
+    const bx = W * (-0.14 + 1.28 * state.boatP);
+    const L = U * 0.16;
+    const bob = motionOn() ? Math.sin(T * 0.0014) * U * 0.006 : 0;
+    const by = horizonY + (H - horizonY) * 0.24 + bob;
+    const heel = (motionOn() ? Math.sin(T * 0.0008) * 0.028 : 0) + windAmp() * 0.045;
+    const nightK = clamp(1 - sunAltitude() * 3, 0, 1);
+    const sailC = mix([247, 243, 232], [214, 218, 228], nightK);
+    const hullC = mix([62, 47, 35], [34, 30, 34], nightK * 0.6);
+    ctx.save();
+    ctx.globalAlpha = 0.16;
+    ctx.fillStyle = "#0d1620";
+    ctx.beginPath(); ctx.ellipse(bx, by + L * 0.16, L * 0.62, L * 0.09, 0, 0, 6.2832); ctx.fill();
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(bx - L * 0.6, by + L * 0.12); ctx.quadraticCurveTo(bx - L * 1.5, by + L * 0.2, bx - L * 2.3, by + L * 0.14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx - L * 0.55, by + L * 0.2); ctx.quadraticCurveTo(bx - L * 1.3, by + L * 0.3, bx - L * 1.9, by + L * 0.26); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.translate(bx, by);
+    ctx.rotate(heel);
+    ctx.fillStyle = rgb(hullC);
+    ctx.beginPath();
+    ctx.moveTo(-L * 0.62, 0);
+    ctx.quadraticCurveTo(-L * 0.5, L * 0.22, 0, L * 0.24);
+    ctx.quadraticCurveTo(L * 0.52, L * 0.2, L * 0.66, -L * 0.02);
+    ctx.lineTo(-L * 0.62, 0);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "rgba(216,178,106,0.85)";
+    ctx.lineWidth = Math.max(1.2, L * 0.03);
+    ctx.beginPath(); ctx.moveTo(-L * 0.6, L * 0.015); ctx.lineTo(L * 0.62, -L * 0.005); ctx.stroke();
+    ctx.strokeStyle = rgb(mix([61, 75, 54], [30, 36, 40], nightK * 0.5));
+    ctx.lineWidth = Math.max(1.6, L * 0.035);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -L * 1.18); ctx.stroke();
+    ctx.fillStyle = "rgba(" + sailC[0] + "," + sailC[1] + "," + sailC[2] + ",0.96)";
+    ctx.beginPath();
+    ctx.moveTo(-L * 0.02, -L * 1.12);
+    ctx.quadraticCurveTo(-L * 0.5, -L * 0.7, -L * 0.56, -L * 0.16);
+    ctx.lineTo(-L * 0.02, -L * 0.16);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(L * 0.02, -L * 1.04);
+    ctx.quadraticCurveTo(L * 0.42, -L * 0.62, L * 0.58, -L * 0.1);
+    ctx.lineTo(L * 0.05, -L * 0.1);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#B4894D";
+    ctx.beginPath();
+    ctx.moveTo(0, -L * 1.18);
+    ctx.lineTo(L * 0.14, -L * 1.13);
+    ctx.lineTo(0, -L * 1.08);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
   function drawAmbient() {
     const th = activeTheme(), nf = clamp(1 - sunAltitude() * 3, 0, 1);
+    if (state.sail.on) {
+      if (th.ambient === "fireflies" && nf > 0.25) {
+        for (const fl of flies) {
+          if (fl.x > W * 0.24 && fl.x < W * 0.76) continue;
+          const glow = (0.4 + 0.6 * Math.abs(Math.sin(T * 0.003 + fl.ph))) * nf;
+          ctx.globalAlpha = glow;
+          const g = ctx.createRadialGradient(fl.x, fl.y, 0, fl.x, fl.y, 7);
+          g.addColorStop(0, "rgba(250,240,150,1)"); g.addColorStop(1, "rgba(250,240,150,0)");
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(fl.x, fl.y, 7, 0, 6.2832); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+      return;
+    }
     if (th.ambient === "petals") {
       for (const p of petals) {
         if (motionOn()) { p.y += p.sp; p.x += Math.sin(T * 0.001 + p.y * 0.01) * 0.5 + p.drift; p.rot += p.rs; if (p.y > H + 10) { p.y = -10; p.x = Math.random() * W; } }
@@ -559,177 +599,6 @@
         ctx.fillStyle = g; ctx.beginPath(); ctx.arc(fl.x, fl.y, 7, 0, 6.2832); ctx.fill();
       }
       ctx.globalAlpha = 1;
-    }
-  }
-
-  let wisteriaGeo = null;
-  function buildWisteriaSide(edgeX, dir, seed) {
-    const r = rng(seed);
-    const scale = Math.min(W, 1200) / 1200;
-    const n = Math.max(2, Math.round(5 * scale));
-    const vine = [];
-    let vx = edgeX + dir * W * (0.015 + r() * 0.015), vy = 0;
-    for (let i = 0; i < 3; i++) {
-      const nx = edgeX + dir * W * (0.02 + r() * 0.06);
-      const ny = H * (0.16 + i * 0.025 + r() * 0.015);
-      const cx = edgeX + dir * W * (0.01 + r() * 0.04);
-      const cy = (vy + ny) / 2;
-      vine.push({ x1: vx, y1: vy, cx: cx, cy: cy, x2: nx, y2: ny });
-      vx = nx; vy = ny;
-    }
-    const branches = [];
-    const racemes = [];
-    for (let i = 0; i < n; i++) {
-      const t = i / Math.max(1, n - 1);
-      const seg = vine[Math.min(vine.length - 1, Math.floor(t * vine.length))];
-      const ax = lerp(seg.x1, seg.x2, 0.3 + r() * 0.4);
-      const ay = lerp(seg.y1, seg.y2, 0.3 + r() * 0.4);
-      const bx = edgeX + dir * W * (0.025 + t * 0.08 + r() * 0.012);
-      const by = ay + H * (0.01 + r() * 0.02);
-      branches.push({ x1: ax, y1: ay, cx: (ax + bx) / 2, cy: (ay + by) / 2, x2: bx, y2: by });
-      const outerness = 1 - t;
-      racemes.push({ x: bx, y: by, len: H * (0.05 + outerness * 0.035 + r() * 0.005), ph: r() * 6.28 });
-    }
-    return { vine: vine, branches: branches, racemes: racemes };
-  }
-  function buildWisteria() {
-    return { left: buildWisteriaSide(0, 1, 5501), right: buildWisteriaSide(W, -1, 6607), w: W, h: H };
-  }
-
-  function drawWisteria() {
-    if (!wisteriaGeo || wisteriaGeo.w !== W || wisteriaGeo.h !== H) wisteriaGeo = buildWisteria();
-    const th = activeTheme(), nf = clamp(1 - sunAltitude() * 3, 0, 1), tw = twilight();
-    const wet = wxKind() === "rain", snowy = wxKind() === "snow";
-    const swayK = (wet ? 0.5 : 1) * 0.4;
-    const vineCol = rgb(shade(hexToRgb(th.foliage[0]), -0.12 * nf));
-    let base = shade(hexToRgb("#9B87B5"), -0.25 * nf);
-    let hi = shade(hexToRgb("#C9BEDD"), -0.25 * nf);
-    if (tw > 0) { base = mix(base, hexToRgb("#D8B26A"), tw * 0.15); hi = mix(hi, hexToRgb("#D8B26A"), tw * 0.15); }
-    const baseCol = rgb(base), hiCol = rgb(hi);
-    for (const side of [wisteriaGeo.left, wisteriaGeo.right]) {
-      ctx.strokeStyle = vineCol;
-      ctx.lineCap = "round";
-      ctx.lineWidth = Math.max(1, W * 0.006);
-      ctx.beginPath();
-      ctx.moveTo(side.vine[0].x1, side.vine[0].y1);
-      for (const v of side.vine) ctx.quadraticCurveTo(v.cx, v.cy, v.x2, v.y2);
-      ctx.stroke();
-      ctx.lineWidth = Math.max(0.8, W * 0.0035);
-      for (const b of side.branches) {
-        ctx.beginPath();
-        ctx.moveTo(b.x1, b.y1);
-        ctx.quadraticCurveTo(b.cx, b.cy, b.x2, b.y2);
-        ctx.stroke();
-      }
-      const active = motionOn() ? side.racemes : side.racemes.slice(0, Math.max(1, Math.ceil(side.racemes.length / 2)));
-      for (const rc of active) {
-        const sway = motionOn() ? Math.sin(T * 0.0009 + rc.ph) * windAmp() * swayK * W * 0.02 : 0;
-        const droop = wet ? 1.15 : 1;
-        const tipx = rc.x + sway, tipy = rc.y + rc.len * droop;
-        ctx.fillStyle = baseCol;
-        for (let i = 0; i < 5; i++) {
-          const pt = (i + 1) / 5;
-          const wob = Math.sin(pt * Math.PI) * W * 0.005;
-          const px = lerp(rc.x, tipx, pt) + (i % 2 === 0 ? wob : -wob);
-          const py = lerp(rc.y, tipy, pt);
-          ctx.beginPath();
-          ctx.ellipse(px, py, W * 0.006, W * 0.003, pt, 0, 6.2832);
-          ctx.fill();
-        }
-        ctx.fillStyle = hiCol;
-        for (let i = 0; i < 2; i++) {
-          const pt = 0.14 + i * 0.16;
-          const wob = Math.sin(pt * Math.PI) * W * 0.005;
-          const px = lerp(rc.x, tipx, pt) + (i % 2 === 0 ? wob : -wob);
-          const py = lerp(rc.y, tipy, pt);
-          ctx.beginPath();
-          ctx.ellipse(px, py, W * 0.005, W * 0.0025, pt, 0, 6.2832);
-          ctx.fill();
-        }
-        if (snowy && motionOn()) {
-          ctx.strokeStyle = "rgba(255,255,255,0.5)";
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(rc.x, rc.y);
-          ctx.lineTo(tipx, tipy);
-          ctx.stroke();
-        }
-      }
-    }
-  }
-
-  let lanternGeo = null;
-  function buildLanterns() {
-    const r = rng(8123);
-    const spec = [
-      { x: 0.03, group: 0 },
-      { x: 0.07, group: 0 },
-      { x: 0.12, group: 0 },
-      { x: 0.90, group: 1 },
-      { x: 0.95, group: 1 }
-    ];
-    const list = [];
-    for (let i = 0; i < spec.length; i++) {
-      const s = spec[i];
-      const ax = s.x * W;
-      const ay = s.group === 0 ? horizonY - 0.28 * H : H * (0.10 + (i - 3) * 0.06);
-      const drop = H * (0.05 + r() * 0.03);
-      list.push({ ax: ax, ay: ay, drop: drop, ph: r() * 6.28 });
-    }
-    return { list: list, w: W, h: H };
-  }
-
-  function drawLanterns() {
-    if (!lanternGeo || lanternGeo.w !== W || lanternGeo.h !== H) lanternGeo = buildLanterns();
-    const nf = clamp(1 - sunAltitude() * 3, 0, 1);
-    if (nf <= 0.25) return;
-    const wet = wxKind() === "rain";
-    const fog = wxKind() === "fog";
-    let alpha = smooth((nf - 0.25) / 0.75);
-    if (wet) alpha *= 0.8;
-    if (Math.abs(moonPhase() - 0.5) < 0.05) alpha *= 0.9;
-    const swayAmp = windAmp() * (wet ? 1.4 : 1);
-    const core = hexToRgb("#F6C878");
-    for (const l of lanternGeo.list) {
-      const sway = motionOn() ? Math.sin(T * 0.0007 + l.ph) * swayAmp * W * 0.02 : 0;
-      const bx = l.ax + sway, by = l.ay + l.drop;
-      ctx.strokeStyle = "rgba(108,122,98,0.4)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(l.ax, l.ay);
-      ctx.lineTo(bx, by);
-      ctx.stroke();
-      const bw = W * 0.018, bh = H * 0.026;
-      const bg = ctx.createRadialGradient(bx, by, 0, bx, by, bw * 0.6);
-      bg.addColorStop(0, "rgba(" + core[0] + "," + core[1] + "," + core[2] + "," + alpha + ")");
-      bg.addColorStop(1, "rgba(" + core[0] + "," + core[1] + "," + core[2] + ",0)");
-      ctx.fillStyle = bg;
-      ctx.beginPath();
-      for (let k = 0; k < 6; k++) {
-        const ang = k / 6 * 6.2832 - Math.PI / 2;
-        const px = bx + Math.cos(ang) * bw * 0.5;
-        const py = by + Math.sin(ang) * bh * 0.5;
-        if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      }
-      ctx.closePath();
-      ctx.fill();
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = "#9A7636";
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.ellipse(bx, by + bh * 0.4, bw * 0.32, bh * 0.12, 0, 0, 6.2832);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      if (motionOn()) {
-        const haloR = W * 0.035 * (fog ? 1.3 : 1);
-        const hg = ctx.createRadialGradient(bx, by, 0, bx, by, haloR);
-        hg.addColorStop(0, "rgba(" + core[0] + "," + core[1] + "," + core[2] + "," + (alpha * 0.5) + ")");
-        hg.addColorStop(1, "rgba(" + core[0] + "," + core[1] + "," + core[2] + ",0)");
-        ctx.fillStyle = hg;
-        ctx.beginPath();
-        ctx.arc(bx, by, haloR, 0, 6.2832);
-        ctx.fill();
-      }
     }
   }
 
@@ -773,30 +642,104 @@
     const alt = sunAltitude();
     if (alt < 0.05) return;
     const df = dayFrac();
-    const sx = W * (0.14 + 0.72 * df);
+    const sx = celestialX(df);
     const g = ctx.createRadialGradient(sx, horizonY * 0.2, 0, sx, horizonY * 0.2, H * 0.9);
     g.addColorStop(0, "rgba(255,246,214," + (0.1 * smooth(alt / 0.4)) + ")");
     g.addColorStop(1, "rgba(255,246,214,0)");
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   }
 
+  const sky = { lines: [], ref: "", fs: 24, lh: 32, tw: 0, prog: 0, y: 160 };
+  function verseFont(px) { return "italic 500 " + px + "px 'Playfair Display', Georgia, serif"; }
+  function layoutVerse() {
+    if (!state.curVerse) return;
+    const v = state.curVerse;
+    sky.fs = clamp(Math.round(U * 0.052), 17, 34);
+    sky.lh = Math.round(sky.fs * 1.38);
+    const maxW = Math.min(W * 0.84, 640);
+    ctx.save();
+    ctx.font = verseFont(sky.fs);
+    const words = ("“" + v.text + "”").split(" ");
+    const lines = [];
+    let line = "";
+    for (const w of words) {
+      const test = line ? line + " " + w : w;
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; }
+      else line = test;
+    }
+    if (line) lines.push(line);
+    sky.lines = lines;
+    sky.ref = v.ref;
+    sky.tw = 0;
+    for (const l of lines) sky.tw = Math.max(sky.tw, ctx.measureText(l).width);
+    ctx.restore();
+    const block = lines.length * sky.lh + sky.fs;
+    sky.y = clamp(horizonY * 0.4, 120, Math.max(130, horizonY - block * 0.5 - U * 0.06));
+  }
+  function driftActive() { return state.settings.autoRotate && motionOn(); }
+  function drawSkyVerse() {
+    if (!state.curVerse || !sky.lines.length) return;
+    const dt = clamp(T - lastTs, 0, 80);
+    if (driftActive() && !state.versePaused && !document.hidden) {
+      sky.prog += dt / 42000;
+      if (sky.prog >= 1) { setVerse(pickVerse()); sky.prog = 0; return; }
+    }
+    if (!driftActive()) sky.prog = 0.5;
+    const p = sky.prog;
+    const cxp = (W + sky.tw) * (1 - p) - sky.tw / 2;
+    const bob = motionOn() ? Math.sin(T * 0.0006) * U * 0.012 : 0;
+    const yTop = sky.y + bob;
+    const a = clamp(Math.min(p / 0.1, (1 - p) / 0.1, 1), 0, 1);
+    if (a <= 0.01) return;
+    const alt = sunAltitude();
+    const nightMode = alt <= 0.09;
+    const s = sky.fs / 22;
+    puff(cxp - sky.tw * 0.28, yTop + sky.lh * (sky.lines.length - 1) * 0.5, s * 1.7, 0.13 * a);
+    puff(cxp + sky.tw * 0.3, yTop + sky.lh * 0.3, s * 1.4, 0.11 * a);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.font = verseFont(sky.fs);
+    ctx.shadowColor = nightMode ? "rgba(8,14,26,0.75)" : "rgba(255,255,255,0.9)";
+    ctx.shadowBlur = sky.fs * 0.55;
+    ctx.fillStyle = nightMode ? "#F5EFDC" : "#243420";
+    for (let i = 0; i < sky.lines.length; i++) {
+      ctx.fillText(sky.lines[i], cxp, yTop + i * sky.lh);
+    }
+    ctx.shadowBlur = sky.fs * 0.3;
+    ctx.font = "600 " + Math.max(11, Math.round(sky.fs * 0.44)) + "px 'DM Sans', sans-serif";
+    ctx.fillStyle = nightMode ? "#D8B26A" : "#9A7636";
+    ctx.fillText(sky.ref.toUpperCase(), cxp, yTop + (sky.lines.length - 1) * sky.lh + sky.fs * 1.25);
+    ctx.restore();
+  }
+
   function frame(ts) {
+    lastTs = T;
     T = ts || 0;
     ctx.clearRect(0, 0, W, H);
     drawSky();
     drawStars();
     drawCelestial();
     drawClouds();
-    drawRidges();
-    drawTreeline();
-    drawArch();
-    daylightWash();
-    drawPond();
-    drawBushes();
-    drawGrassesFlowers();
+    if (state.sail.on) {
+      drawRidges();
+      drawWater();
+      drawBanks();
+      drawTreeline(true);
+      daylightWash();
+      drawBoat();
+    } else {
+      drawGround();
+      drawRidges();
+      drawTreeline(false);
+      daylightWash();
+      drawPond();
+      drawBushes();
+      drawGrassesFlowers();
+    }
+    drawSkyVerse();
     drawAmbient();
-    drawWisteria();
-    drawLanterns();
     drawWeather();
     drawFog();
     requestAnimationFrame(frame);
@@ -805,6 +748,8 @@
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth; H = window.innerHeight;
+    U = Math.min(W, H);
+    horizonY = H * (H > W ? 0.52 : 0.6);
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
     cv.style.width = W + "px"; cv.style.height = H + "px";
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -813,71 +758,87 @@
 
   const el = id => document.getElementById(id);
 
+  function allVerses() { return VERSES.concat(state.customVerses); }
   function currentMood() {
-    const k = wxKind();
+    const c = state.weather.code, k = wxKind();
+    if (c >= 95) return "storm";
     if (k === "rain") return "rain";
-    if (k === "snow") return "renewal";
-    if (isNight()) { return ["night", "peace", "light", "wonder"][Math.floor(Math.random() * 4)]; }
-    if (twilight() > 0.4 && nowMin() < state.sun.sunrise + 90) return "dawn";
-    if (sunAltitude() > 0.3) return ["growth", "wonder", "day", "season"][Math.floor(Math.random() * 4)];
+    if (k === "snow") return "snow";
+    if (state.sail.on && Math.random() < 0.6) return ["sea", "sailing", "journey", "water"][Math.floor(Math.random() * 4)];
+    if (state.weather.wind >= 16) return "wind";
+    const m = nowMin(), sr = state.sun.sunrise, ss = state.sun.sunset;
+    if (m >= sr - 40 && m <= sr + 75) return "dawn";
+    if (m >= ss - 75 && m <= ss + 40) return "dusk";
+    if (isNight()) return ["night", "stars", "peace", "light"][Math.floor(Math.random() * 4)];
+    if (sunAltitude() > 0.3) return ["day", "growth", "wonder", "season"][Math.floor(Math.random() * 4)];
     return "peace";
   }
   function pickVerse() {
+    const cur = state.curVerse;
+    const hers = state.customVerses.filter(v => !cur || v.text !== cur.text);
+    if (hers.length && Math.random() < 0.35) return hers[Math.floor(Math.random() * hers.length)];
     const mood = currentMood();
-    let pool = VERSES.map((v, i) => ({ v: v, i: i })).filter(o => o.v.moods.indexOf(mood) >= 0 && o.i !== state.verseIdx);
-    if (!pool.length) pool = VERSES.map((v, i) => ({ v: v, i: i })).filter(o => o.i !== state.verseIdx);
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    return pick.i;
+    let pool = VERSES.filter(v => v.moods.indexOf(mood) >= 0 && (!cur || v.ref !== cur.ref));
+    if (!pool.length) pool = allVerses().filter(v => !cur || v.text !== cur.text);
+    if (!pool.length) pool = allVerses();
+    return pool[Math.floor(Math.random() * pool.length)];
   }
-  function renderVerse(idx) {
-    const v = VERSES[idx];
-    el("verse-text").textContent = "\u201C" + v.text + "\u201D";
-    el("verse-ref").textContent = v.ref;
-  }
-  function showVerse(idx) {
-    const box = el("scripture");
-    box.classList.add("fading");
-    setTimeout(() => { state.verseIdx = idx; renderVerse(idx); box.classList.remove("fading"); }, 500);
-  }
-  let rotateTimer = null;
-  function scheduleRotate() {
-    if (rotateTimer) clearInterval(rotateTimer);
-    rotateTimer = setInterval(() => { if (state.settings.autoRotate && !state.versePaused) showVerse(pickVerse()); }, 45000);
+  function setVerse(v) {
+    state.curVerse = v;
+    el("verse-live").textContent = v.text + " " + v.ref;
+    layoutVerse();
+    sky.prog = 0;
   }
 
   function wxLabel(code) {
-    if (code === 0) return ["Clear", "\u2600\uFE0F"];
-    if (code <= 2) return ["Fair", "\u26C5"];
-    if (code === 3) return ["Overcast", "\u2601\uFE0F"];
-    if (code === 45 || code === 48) return ["Fog", "\uD83C\uDF2B\uFE0F"];
-    if (code >= 51 && code <= 57) return ["Drizzle", "\uD83C\uDF26\uFE0F"];
-    if (code >= 61 && code <= 67 || code >= 80 && code <= 82) return ["Rain", "\uD83C\uDF27\uFE0F"];
-    if (code >= 71 && code <= 77 || code === 85 || code === 86) return ["Snow", "\u2744\uFE0F"];
-    if (code >= 95) return ["Storm", "\u26C8\uFE0F"];
-    return ["Sky", "\u2601\uFE0F"];
+    if (code === 0) return ["Clear", "☀️"];
+    if (code <= 2) return ["Fair", "⛅"];
+    if (code === 3) return ["Overcast", "☁️"];
+    if (code === 45 || code === 48) return ["Fog", "🌫️"];
+    if (code >= 51 && code <= 57) return ["Drizzle", "🌦️"];
+    if (code >= 61 && code <= 67 || code >= 80 && code <= 82) return ["Rain", "🌧️"];
+    if (code >= 71 && code <= 77 || code === 85 || code === 86) return ["Snow", "❄️"];
+    if (code >= 95) return ["Storm", "⛈️"];
+    return ["Sky", "☁️"];
   }
   function updateConditions() {
     el("cond-place").textContent = state.loc.place;
     const w = wxLabel(state.weather.code);
     el("cond-wx-glyph").textContent = w[1];
-    el("cond-wx-text").innerHTML = (state.weather.temp != null ? "<b>" + state.weather.temp + "\u00B0</b> " : "") + w[0];
+    el("cond-wx-text").innerHTML = (state.weather.temp != null ? "<b>" + state.weather.temp + "°</b> " : "") + w[0];
+    el("temp-link").href = "https://www.google.com/search?q=" + encodeURIComponent("weather " + state.loc.place);
     const issEl = el("cond-iss");
     if (state.iss) { issEl.style.display = ""; el("cond-iss-text").innerHTML = "ISS <b>" + state.iss.dist.toLocaleString() + " km</b>"; }
     else issEl.style.display = "none";
     const aqiEl = el("cond-aqi");
     if (state.aqi != null) { aqiEl.style.display = ""; el("cond-aqi-text").innerHTML = "Air <b>" + state.aqi + "</b>"; }
     else aqiEl.style.display = "none";
+    updateHoursBar();
+  }
+  function updateHoursBar() {
+    const h = state.hourly;
+    if (!h || !h.t.length) return;
+    el("hb-rain").textContent = h.pp[0] + "%";
+    el("hb-wind").textContent = Math.round(h.ws[0]) + " mph";
+    el("hb-cloud").textContent = h.cc[0] + "%";
   }
 
   async function fetchWeather() {
     try {
       const { lat, lon } = state.loc;
-      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&current=temperature_2m,weather_code,cloud_cover,wind_speed_10m,is_day,precipitation&daily=sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=1";
+      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&current=temperature_2m,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,is_day,precipitation&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m&daily=sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=2";
       const r = await fetch(url); if (!r.ok) throw 0;
       const j = await r.json(), c = j.current;
-      state.weather = { code: c.weather_code, temp: Math.round(c.temperature_2m), cloud: c.cloud_cover, wind: c.wind_speed_10m, isDay: c.is_day, precip: c.precipitation };
+      state.weather = { code: c.weather_code, temp: Math.round(c.temperature_2m), cloud: c.cloud_cover, wind: c.wind_speed_10m, windDir: c.wind_direction_10m, isDay: c.is_day, precip: c.precipitation };
       if (j.daily && j.daily.sunrise) state.sun = { sunrise: minutesOf(j.daily.sunrise[0]), sunset: minutesOf(j.daily.sunset[0]) };
-      persist(); updateConditions(); initParticles();
+      if (j.hourly && j.hourly.time) {
+        const hh = j.hourly;
+        let i0 = hh.time.indexOf(c.time.slice(0, 13) + ":00");
+        if (i0 < 0) i0 = 0;
+        const take = (arr) => arr.slice(i0, i0 + 24);
+        state.hourly = { t: take(hh.time), tp: take(hh.temperature_2m), pp: take(hh.precipitation_probability), pr: take(hh.precipitation), code: take(hh.weather_code), cc: take(hh.cloud_cover), ws: take(hh.wind_speed_10m), wd: take(hh.wind_direction_10m), wg: take(hh.wind_gusts_10m) };
+      }
+      persist(); updateConditions(); initParticles(); renderHours();
     } catch (e) { updateConditions(); }
   }
   async function fetchAqi() {
@@ -899,17 +860,87 @@
       updateConditions();
     } catch (e) {}
   }
+  async function fetchRadar() {
+    try {
+      const r = await fetch("https://api.rainviewer.com/public/weather-maps.json"); if (!r.ok) return;
+      const j = await r.json();
+      if (j.radar && j.radar.past && j.radar.past.length) {
+        state.rv = { host: j.host, path: j.radar.past[j.radar.past.length - 1].path };
+        updateSat();
+      }
+    } catch (e) {}
+  }
   async function geocode(q) {
     try {
-      const url = "https://geocoding-api.open-meteo.com/v1/search?name=" + encodeURIComponent(q) + "&count=1&language=en&format=json";
+      const parts = q.split(",").map(s => s.trim()).filter(Boolean);
+      const name = parts[0], region = (parts[1] || "").toUpperCase();
+      const url = "https://geocoding-api.open-meteo.com/v1/search?name=" + encodeURIComponent(name) + "&count=10&language=en&format=json";
       const r = await fetch(url); if (!r.ok) return null;
       const j = await r.json();
       if (!j.results || !j.results.length) return null;
-      const g = j.results[0];
+      let g = j.results[0];
+      if (region) {
+        const hit = j.results.find(x => {
+          const a1 = (x.admin1 || "").toUpperCase();
+          const initials = a1.split(" ").map(w => w[0] || "").join("");
+          return a1 === region || a1.startsWith(region) || initials === region;
+        });
+        if (hit) g = hit;
+      }
       return { lat: +g.latitude.toFixed(4), lon: +g.longitude.toFixed(4), place: g.name + (g.admin1 ? ", " + g.admin1 : "") };
     } catch (e) { return null; }
   }
-  function refreshData() { fetchWeather(); fetchAqi(); fetchIss(); }
+  function refreshData() { fetchWeather(); fetchAqi(); fetchIss(); fetchRadar(); }
+
+  function tileXY(lat, lon, z) {
+    const n = Math.pow(2, z);
+    const x = Math.floor((lon + 180) / 360 * n);
+    const rad = lat * Math.PI / 180;
+    const y = Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n);
+    return { x: clamp(x, 0, n - 1), y: clamp(y, 0, n - 1) };
+  }
+  function gibsTime(hoursBack) {
+    const d = new Date(Date.now() - 25 * 60000 - hoursBack * 3600000);
+    if (hoursBack > 0) d.setUTCMinutes(0, 0, 0);
+    else d.setUTCMinutes(Math.floor(d.getUTCMinutes() / 10) * 10, 0, 0);
+    return d.toISOString().slice(0, 19) + "Z";
+  }
+  let satFellBack = false;
+  function updateSat() {
+    const z = 6, t = tileXY(state.loc.lat, state.loc.lon, z);
+    const hb = -(+el("sat-scrub").value);
+    const time = gibsTime(hb);
+    satFellBack = false;
+    el("sat-img").src = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GOES-East_ABI_GeoColor/default/" + time + "/GoogleMapsCompatible_Level7/" + z + "/" + t.y + "/" + t.x + ".png";
+    el("sat-time").textContent = hb === 0 ? "Latest view" : hb + "h ago";
+    if (state.rv) el("sat-radar").src = state.rv.host + state.rv.path + "/256/" + z + "/" + t.x + "/" + t.y + "/2/1_1.png";
+  }
+  function satError() {
+    if (satFellBack) return;
+    satFellBack = true;
+    const z = 6, t = tileXY(state.loc.lat, state.loc.lon, z);
+    el("sat-img").src = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GOES-East_ABI_GeoColor/default/default/GoogleMapsCompatible_Level7/" + z + "/" + t.y + "/" + t.x + ".png";
+  }
+
+  function hourLabel(t, i) { return i === 0 ? "Now" : t.slice(11, 16); }
+  function renderHours() {
+    const h = state.hourly;
+    if (!h || !h.t.length) return;
+    const rainEl = el("hours-rain"), windEl = el("hours-wind"), cloudEl = el("hours-cloud");
+    let rh = "", wh = "", ch = "";
+    const n = Math.min(12, h.t.length);
+    for (let i = 0; i < n; i++) {
+      rh += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar'><i style='width:" + clamp(h.pp[i], 2, 100) + "%'></i></span><span class='hval'>" + h.pp[i] + "% <small>" + (+h.pr[i]).toFixed(2) + " in</small></span></div>";
+      wh += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar wind'><i style='width:" + clamp(h.ws[i] / 32 * 100, 3, 100) + "%'></i></span><span class='hval'><span class='harrow' style='transform:rotate(" + ((h.wd[i] + 180) % 360) + "deg)'>&#8593;</span> " + Math.round(h.ws[i]) + " <small>g " + Math.round(h.wg[i]) + " mph</small></span></div>";
+    }
+    for (let i = 0; i < Math.min(8, h.t.length); i++) {
+      ch += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar cloud'><i style='width:" + clamp(h.cc[i], 2, 100) + "%'></i></span><span class='hval'>" + h.cc[i] + "% <small>" + Math.round(h.tp[i]) + "°</small></span></div>";
+    }
+    rainEl.innerHTML = rh;
+    windEl.innerHTML = wh;
+    cloudEl.innerHTML = ch;
+    updateHoursBar();
+  }
 
   let toastTimer = null;
   function toast(msg) {
@@ -991,13 +1022,234 @@
     el("about-loc").textContent = state.loc.place;
     el("motion-toggle").classList.toggle("on", state.settings.motion);
     el("rotate-toggle").classList.toggle("on", state.settings.autoRotate);
+    document.querySelectorAll("#skymode-seg button").forEach(b => b.classList.toggle("on", b.dataset.v === state.settings.skyMode));
     openSheet("about");
   }
 
+  function renderCvList() {
+    const wrap = el("cv-list");
+    if (!state.customVerses.length) { wrap.innerHTML = "<p class='empty-note'>Nothing saved yet. Anything you add will drift through the sky with the scriptures.</p>"; return; }
+    wrap.innerHTML = "";
+    state.customVerses.forEach((v, i) => {
+      const row = document.createElement("div");
+      row.className = "cv-row";
+      const main = document.createElement("div");
+      main.className = "cv-main";
+      const p = document.createElement("p");
+      p.textContent = "“" + v.text + "”";
+      const s = document.createElement("small");
+      s.textContent = v.ref;
+      main.appendChild(p); main.appendChild(s);
+      const del = document.createElement("button");
+      del.className = "del";
+      del.setAttribute("aria-label", "Remove");
+      del.textContent = "×";
+      del.onclick = () => { state.customVerses.splice(i, 1); persist(); renderCvList(); };
+      row.appendChild(main); row.appendChild(del);
+      wrap.appendChild(row);
+    });
+  }
+  function saveCustomVerse() {
+    const text = (el("cv-text").value || "").trim().replace(/^["“]+|["”]+$/g, "");
+    if (!text) { toast("Write something first"); return; }
+    const ref = (el("cv-ref").value || "").trim() || "Hers";
+    const v = { text: text, ref: ref, moods: ["hers"] };
+    state.customVerses.push(v);
+    persist(); renderCvList();
+    el("cv-text").value = ""; el("cv-ref").value = "";
+    setVerse(v);
+    toast("Added to the sky");
+  }
+
+  function nm(km) { return km * 0.539957; }
+  function bearingDeg(la1, lo1, la2, lo2) {
+    const r = Math.PI / 180;
+    const y = Math.sin((lo2 - lo1) * r) * Math.cos(la2 * r);
+    const x = Math.cos(la1 * r) * Math.sin(la2 * r) - Math.sin(la1 * r) * Math.cos(la2 * r) * Math.cos((lo2 - lo1) * r);
+    return (Math.atan2(y, x) / r + 360) % 360;
+  }
+  function compassPt(d) { return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(d / 45) % 8]; }
+  function fmtDur(hours) {
+    const total = Math.round(hours * 60);
+    const d = Math.floor(total / 1440), h = Math.floor((total % 1440) / 60), m = total % 60;
+    if (d > 0) return d + "d " + h + "h";
+    if (h > 0) return h + "h " + (m < 10 ? "0" : "") + m + "m";
+    return m + "m";
+  }
+  let openStopId = null;
+  async function fetchStopWx(stop) {
+    try {
+      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + stop.lat + "&longitude=" + stop.lon + "&current=temperature_2m,weather_code,wind_speed_10m&hourly=temperature_2m,wind_speed_10m,wind_gusts_10m,precipitation_probability&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=2";
+      const r = await fetch(url); if (!r.ok) return;
+      const j = await r.json();
+      stop.temp = Math.round(j.current.temperature_2m);
+      stop.wind = Math.round(j.current.wind_speed_10m);
+      stop.code = j.current.weather_code;
+      if (j.hourly && j.hourly.time) {
+        let i0 = j.hourly.time.indexOf(j.current.time.slice(0, 13) + ":00");
+        if (i0 < 0) i0 = 0;
+        const take = (a) => a.slice(i0, i0 + 12);
+        stop.hourly = { t: take(j.hourly.time), tp: take(j.hourly.temperature_2m), ws: take(j.hourly.wind_speed_10m), wg: take(j.hourly.wind_gusts_10m), pp: take(j.hourly.precipitation_probability) };
+      }
+      stop.fetchedAt = Date.now();
+      persist(); renderRoute();
+    } catch (e) {}
+  }
+  function drawStopChart(c, stop) {
+    const h = stop.hourly; if (!h || !h.t.length) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cw = c.clientWidth || 300, chh = 132;
+    c.width = Math.round(cw * dpr); c.height = Math.round(chh * dpr);
+    const g = c.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, cw, chh);
+    const padL = 30, padR = 10, padT = 16, windH = 38, gap = 14;
+    const plotW = cw - padL - padR, tempH = chh - padT - windH - gap - 16;
+    const n = h.t.length;
+    const xs = (i) => padL + (n === 1 ? 0 : i / (n - 1) * plotW);
+    let tMin = Math.min.apply(null, h.tp), tMax = Math.max.apply(null, h.tp);
+    if (tMax - tMin < 4) { tMax += 2; tMin -= 2; }
+    const ty = (v) => padT + (1 - (v - tMin) / (tMax - tMin)) * tempH;
+    const wMax = Math.max(10, Math.max.apply(null, h.wg));
+    const wTop = padT + tempH + gap, wBase = wTop + windH;
+    g.font = "600 9px 'DM Sans', sans-serif";
+    g.fillStyle = "#6C7A62";
+    g.textAlign = "center";
+    for (let i = 0; i < n; i += 3) g.fillText(i === 0 ? "now" : h.t[i].slice(11, 13), xs(i), chh - 4);
+    g.strokeStyle = "rgba(40,60,30,0.12)";
+    g.lineWidth = 1;
+    g.beginPath(); g.moveTo(padL, wBase); g.lineTo(cw - padR, wBase); g.stroke();
+    for (let i = 0; i < n; i++) {
+      const bw = Math.max(4, plotW / n * 0.5);
+      const bh = clamp(h.ws[i] / wMax, 0.04, 1) * windH;
+      g.fillStyle = "rgba(78,114,134,0.78)";
+      g.fillRect(xs(i) - bw / 2, wBase - bh, bw, bh);
+      const gh = clamp(h.wg[i] / wMax, 0, 1) * windH;
+      g.strokeStyle = "rgba(78,114,134,0.45)";
+      g.beginPath(); g.moveTo(xs(i) - bw / 2, wBase - gh); g.lineTo(xs(i) + bw / 2, wBase - gh); g.stroke();
+    }
+    g.strokeStyle = "#B4894D";
+    g.lineWidth = 2;
+    g.lineJoin = "round";
+    g.beginPath();
+    for (let i = 0; i < n; i++) { const x = xs(i), y = ty(h.tp[i]); if (i === 0) g.moveTo(x, y); else g.lineTo(x, y); }
+    g.stroke();
+    g.fillStyle = "#B4894D";
+    for (let i = 0; i < n; i++) { g.beginPath(); g.arc(xs(i), ty(h.tp[i]), 2.2, 0, 6.2832); g.fill(); }
+    g.textAlign = "left";
+    g.fillStyle = "#3D4B36";
+    g.font = "700 10px 'DM Sans', sans-serif";
+    g.fillText(Math.round(tMax) + "°", 3, ty(tMax) + 4);
+    g.fillText(Math.round(tMin) + "°", 3, ty(tMin) + 4);
+    g.fillStyle = "#4E7286";
+    g.font = "600 9px 'DM Sans', sans-serif";
+    g.fillText("wind mph, tick is gust", padL + 2, wTop + 2);
+  }
+  function renderRoute() {
+    const wrap = el("stop-list");
+    const stops = state.sail.stops;
+    const kn = state.sail.speed || 5;
+    document.querySelectorAll("#speed-seg button").forEach(b => b.classList.toggle("on", +b.dataset.v === kn));
+    if (!stops.length) { wrap.innerHTML = "<p class='empty-note'>Add harbors and towns along her way. Each stop carries its own hourly temperature and wind chart, plus course and sail time for every leg.</p>"; el("route-total").textContent = ""; return; }
+    wrap.innerHTML = "";
+    let total = 0;
+    const curIdx = stops.findIndex(s => s.name === state.loc.place);
+    let legA = null, legB = null;
+    if (curIdx >= 0 && curIdx < stops.length - 1) { legA = stops[curIdx]; legB = stops[curIdx + 1]; }
+    else if (curIdx < 0 && stops.length > 1) { legA = stops[0]; legB = stops[1]; }
+    if (legA && legB) {
+      const d = nm(haversine(legA.lat, legA.lon, legB.lat, legB.lon));
+      const brg = bearingDeg(legA.lat, legA.lon, legB.lat, legB.lon);
+      const nl = document.createElement("div");
+      nl.className = "nextleg";
+      nl.innerHTML = "Next leg <b>" + legA.name.split(",")[0] + " to " + legB.name.split(",")[0] + "</b> · " + d.toFixed(1) + " nm · course " + Math.round(brg) + "° " + compassPt(brg) + " · about <b>" + fmtDur(d / kn) + "</b> at " + kn + " kn" + (legB.temp != null ? " · " + legB.temp + "° and " + legB.wind + " mph waiting there" : "");
+      wrap.appendChild(nl);
+    }
+    stops.forEach((s, i) => {
+      const row = document.createElement("div");
+      row.className = "stop-row";
+      const mv = document.createElement("div");
+      mv.className = "mvcol";
+      const up = document.createElement("button"); up.className = "mv"; up.textContent = "▴"; up.disabled = i === 0;
+      up.onclick = () => { const t = stops[i - 1]; stops[i - 1] = stops[i]; stops[i] = t; persist(); renderRoute(); };
+      const dn = document.createElement("button"); dn.className = "mv"; dn.textContent = "▾"; dn.disabled = i === stops.length - 1;
+      dn.onclick = () => { const t = stops[i + 1]; stops[i + 1] = stops[i]; stops[i] = t; persist(); renderRoute(); };
+      mv.appendChild(up); mv.appendChild(dn);
+      const main = document.createElement("div");
+      main.className = "stop-main";
+      const b = document.createElement("b");
+      b.textContent = (i + 1) + ". " + s.name;
+      const sm = document.createElement("small");
+      let leg = "";
+      if (i > 0) {
+        const p = stops[i - 1];
+        const d = nm(haversine(p.lat, p.lon, s.lat, s.lon));
+        total += d;
+        const brg = bearingDeg(p.lat, p.lon, s.lat, s.lon);
+        leg = d.toFixed(1) + " nm · " + Math.round(brg) + "° " + compassPt(brg) + " · " + fmtDur(d / kn) + " · ";
+      }
+      sm.textContent = leg + (s.temp != null ? s.temp + "° · wind " + s.wind + " mph" : "fetching sky...");
+      main.appendChild(b); main.appendChild(sm);
+      const exp = document.createElement("button");
+      exp.className = "mini";
+      exp.textContent = openStopId === s.id ? "Hide" : "Hours";
+      exp.onclick = () => { openStopId = openStopId === s.id ? null : s.id; if (openStopId === s.id && (!s.hourly || !s.fetchedAt || Date.now() - s.fetchedAt > 1800000)) fetchStopWx(s); renderRoute(); };
+      const go = document.createElement("button");
+      go.className = "mini" + (state.loc.place === s.name ? " here" : "");
+      go.textContent = state.loc.place === s.name ? "Here" : "Sail here";
+      go.onclick = () => { state.loc = { lat: s.lat, lon: s.lon, place: s.name }; persist(); refreshData(); renderRoute(); toast("Sailing to " + s.name.split(",")[0]); };
+      const del = document.createElement("button");
+      del.className = "del";
+      del.setAttribute("aria-label", "Remove stop");
+      del.textContent = "×";
+      del.onclick = () => { if (openStopId === s.id) openStopId = null; state.sail.stops.splice(i, 1); persist(); renderRoute(); };
+      row.appendChild(mv); row.appendChild(main); row.appendChild(exp); row.appendChild(go); row.appendChild(del);
+      wrap.appendChild(row);
+      if (openStopId === s.id) {
+        const ex = document.createElement("div");
+        ex.className = "stop-expand";
+        const c = document.createElement("canvas");
+        ex.appendChild(c);
+        const rl = document.createElement("div");
+        rl.className = "rowline";
+        const lab = document.createElement("span");
+        lab.textContent = s.hourly ? "Next 12 hours at " + s.name.split(",")[0] : "Fetching the sky over " + s.name.split(",")[0] + "...";
+        const full = document.createElement("button");
+        full.className = "mini";
+        full.textContent = "Full hourly sky";
+        full.onclick = () => { state.loc = { lat: s.lat, lon: s.lon, place: s.name }; persist(); refreshData(); closeSheet(); renderHours(); updateSat(); openSheet("hours"); };
+        rl.appendChild(lab); rl.appendChild(full);
+        ex.appendChild(rl);
+        wrap.appendChild(ex);
+        requestAnimationFrame(() => drawStopChart(c, s));
+      }
+    });
+    el("route-total").textContent = stops.length > 1 ? "About " + total.toFixed(1) + " nautical miles end to end, roughly " + fmtDur(total / kn) + " under sail at " + kn + " kn." : "";
+  }
+  async function addStop() {
+    const q = (el("stop-input").value || "").trim(); if (!q) return;
+    toast("Searching");
+    const g = await geocode(q);
+    if (!g) { toast("Place not found"); return; }
+    const stop = { id: "s" + Date.now().toString(36), name: g.place, lat: g.lat, lon: g.lon, temp: null, wind: null, code: null };
+    state.sail.stops.push(stop);
+    el("stop-input").value = "";
+    persist(); renderRoute();
+    fetchStopWx(stop);
+  }
+  function setSailing(on) {
+    state.sail.on = on;
+    el("sail-toggle").setAttribute("aria-pressed", on ? "true" : "false");
+    el("open-route").style.display = on ? "" : "none";
+    persist(); initParticles();
+    toast(on ? "Sailing mode. Fair winds." : "Back to the garden.");
+    if (on && !state.sail.stops.length) { renderRoute(); openSheet("route"); }
+  }
+
   function wire() {
-    el("verse-next").onclick = () => showVerse(pickVerse());
+    el("verse-next").onclick = () => setVerse(pickVerse());
     const pause = el("verse-pause");
-    pause.onclick = () => { state.versePaused = !state.versePaused; pause.setAttribute("aria-pressed", state.versePaused ? "true" : "false"); pause.textContent = state.versePaused ? "\u25B6" : "\u275A\u275A"; };
+    pause.onclick = () => { state.versePaused = !state.versePaused; pause.setAttribute("aria-pressed", state.versePaused ? "true" : "false"); pause.textContent = state.versePaused ? "▶" : "❚❚"; };
     el("open-about").onclick = openAbout;
     el("sheet-backdrop").onclick = closeSheet;
     document.querySelectorAll(".sheet-close").forEach(b => b.onclick = closeSheet);
@@ -1025,6 +1277,39 @@
     el("city-input").addEventListener("keydown", e => { if (e.key === "Enter") el("city-go").click(); });
     el("motion-toggle").onclick = () => { state.settings.motion = !state.settings.motion; el("motion-toggle").classList.toggle("on", state.settings.motion); persist(); initParticles(); };
     el("rotate-toggle").onclick = () => { state.settings.autoRotate = !state.settings.autoRotate; el("rotate-toggle").classList.toggle("on", state.settings.autoRotate); persist(); };
+    document.querySelectorAll("#skymode-seg button").forEach(b => b.onclick = () => {
+      state.settings.skyMode = b.dataset.v;
+      if (b.dataset.v === "cycle") { state.cycleStart = Date.now(); state.cycleBase = realNowMin(); toast("Playing the whole day"); }
+      else toast("Following the real sky");
+      document.querySelectorAll("#skymode-seg button").forEach(x => x.classList.toggle("on", x === b));
+      persist(); initParticles();
+    });
+    el("open-hours").onclick = () => { renderHours(); updateSat(); openSheet("hours"); };
+    document.querySelectorAll("#hours-tabs button").forEach(b => b.onclick = () => {
+      document.querySelectorAll("#hours-tabs button").forEach(x => x.classList.toggle("on", x === b));
+      el("hours-rain").style.display = b.dataset.t === "rain" ? "" : "none";
+      el("hours-wind").style.display = b.dataset.t === "wind" ? "" : "none";
+      el("hours-sky").style.display = b.dataset.t === "sky" ? "" : "none";
+      if (b.dataset.t === "sky") updateSat();
+    });
+    el("sat-scrub").oninput = updateSat;
+    el("sat-img").onerror = satError;
+    el("radar-toggle").onclick = () => {
+      const r = el("sat-radar");
+      r.classList.toggle("on");
+      el("radar-toggle").textContent = r.classList.contains("on") ? "Rain radar on" : "Rain radar off";
+    };
+    el("open-verses").onclick = () => { renderCvList(); openSheet("verses"); };
+    el("cv-save").onclick = saveCustomVerse;
+    el("sail-toggle").onclick = () => setSailing(!state.sail.on);
+    el("open-route").onclick = () => { renderRoute(); openSheet("route"); };
+    el("stop-add").onclick = addStop;
+    el("stop-input").addEventListener("keydown", e => { if (e.key === "Enter") addStop(); });
+    document.querySelectorAll("#speed-seg button").forEach(b => b.onclick = () => { state.sail.speed = +b.dataset.v; persist(); renderRoute(); });
+    document.querySelector(".stage").addEventListener("click", e => {
+      if (e.target !== e.currentTarget) return;
+      if (e.clientY < horizonY) setVerse(pickVerse());
+    });
   }
 
   function registerSW() {
@@ -1038,14 +1323,17 @@
     window.addEventListener("resize", () => { clearTimeout(window.__rt); window.__rt = setTimeout(resize, 180); });
     buildThemeChips();
     wire();
-    renderVerse(state.verseIdx = pickVerse());
+    if (state.sail.on) { el("sail-toggle").setAttribute("aria-pressed", "true"); el("open-route").style.display = ""; }
+    setVerse(pickVerse());
     updateConditions();
+    renderHours();
     refreshData();
-    scheduleRotate();
     setInterval(fetchWeather, 600000);
     setInterval(fetchAqi, 900000);
     setInterval(fetchIss, 12000);
+    setInterval(fetchRadar, 600000);
     registerSW();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutVerse);
     requestAnimationFrame(frame);
   }
 

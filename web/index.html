@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <title>Secret Garden</title>
-<meta name="description" content="A living garden that breathes with real weather, sky, and the moon, with scripture at its heart.">
+<meta name="description" content="A living garden and river that breathe with real weather, sky, and the moon, with scripture drifting through the clouds.">
 <meta name="theme-color" content="#E9F0E2">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -20,6 +20,7 @@
 <body>
 <canvas id="scene" aria-hidden="true"></canvas>
 <div class="vignette" aria-hidden="true"></div>
+<p class="sr-only" id="verse-live" aria-live="polite"></p>
 
 <div class="stage">
   <header class="topbar">
@@ -29,26 +30,34 @@
     </div>
     <div class="conditions">
       <span class="chip-info live"><span id="cond-place">Beaver, PA</span></span>
-      <span class="chip-info"><span class="glyph" id="cond-wx-glyph">&#9728;&#65039;</span><span id="cond-wx-text">Clear</span></span>
+      <a class="chip-info tap" id="temp-link" target="_blank" rel="noopener" href="https://www.google.com/search?q=weather+Beaver+PA" aria-label="Check this temperature on Google"><span class="glyph" id="cond-wx-glyph">&#9728;&#65039;</span><span id="cond-wx-text">Clear</span></a>
       <span class="chip-info" id="cond-aqi" style="display:none"><span id="cond-aqi-text">Air</span></span>
       <span class="chip-info" id="cond-iss" style="display:none"><span class="glyph">&#128760;</span><span id="cond-iss-text">ISS</span></span>
     </div>
   </header>
 
   <main class="center">
-    <section class="scripture" id="scripture" aria-live="polite">
-      <p class="verse-text" id="verse-text">&#8220;The light shineth in darkness; and the darkness comprehended it not.&#8221;</p>
-      <p class="verse-ref shimmer-gold-text" id="verse-ref">John 1:5</p>
-      <div class="verse-controls">
-        <button class="icon-btn" id="verse-pause" aria-pressed="false" aria-label="Pause verse rotation">&#10074;&#10074;</button>
-        <button class="icon-btn" id="verse-next" aria-label="Next verse">&#8635;</button>
-      </div>
-    </section>
+    <div class="verse-float">
+      <button class="icon-btn" id="verse-pause" aria-pressed="false" aria-label="Pause verse drift">&#10074;&#10074;</button>
+      <button class="icon-btn" id="verse-next" aria-label="Next verse">&#8635;</button>
+    </div>
   </main>
 
-  <nav class="dock" aria-label="Garden themes">
+  <div class="hours-bar" role="group" aria-label="Next hours">
+    <span class="hb-chip"><span class="glyph">&#128167;</span><b id="hb-rain">--%</b></span>
+    <span class="hb-chip"><span class="glyph">&#127788;&#65039;</span><b id="hb-wind">--</b></span>
+    <span class="hb-chip"><span class="glyph">&#9729;&#65039;</span><b id="hb-cloud">--%</b></span>
+    <button class="chip hb-open" id="open-hours">Hourly sky</button>
+  </div>
+
+  <nav class="dock" aria-label="Garden themes and tools">
     <div class="dock-scroll" id="theme-chips"></div>
-    <button class="icon-btn" id="open-about" aria-label="Settings and about">&#9881;</button>
+    <div class="dock-tools">
+      <button class="icon-btn" id="open-verses" aria-label="Her verses">&#10077;</button>
+      <button class="icon-btn" id="sail-toggle" aria-pressed="false" aria-label="Sailing mode">&#9973;</button>
+      <button class="icon-btn" id="open-route" aria-label="Route planner" style="display:none">&#9875;</button>
+      <button class="icon-btn" id="open-about" aria-label="Settings and about">&#9881;</button>
+    </div>
   </nav>
 </div>
 
@@ -101,6 +110,83 @@
   </div>
 </section>
 
+<section class="sheet" id="sheet-hours" role="dialog" aria-label="Hourly sky">
+  <div class="sheet-head">
+    <h2>Hourly <span class="em">sky</span></h2>
+    <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <div class="field">
+    <div class="seg" id="hours-tabs">
+      <button data-t="rain" class="on">Rain</button>
+      <button data-t="wind">Wind</button>
+      <button data-t="sky">Satellite</button>
+    </div>
+  </div>
+  <div class="hours-panel" id="hours-rain"></div>
+  <div class="hours-panel" id="hours-wind" style="display:none"></div>
+  <div class="hours-panel" id="hours-sky" style="display:none">
+    <div class="sat-wrap">
+      <img id="sat-img" alt="Satellite cloud view" width="256" height="256">
+      <img id="sat-radar" alt="" width="256" height="256">
+    </div>
+    <div class="sat-controls">
+      <input type="range" id="sat-scrub" min="-12" max="0" value="0" step="1" aria-label="Hours back">
+      <div class="sat-row"><span id="sat-time">Latest</span><button class="chip" id="radar-toggle">Rain radar on</button></div>
+    </div>
+    <div id="hours-cloud"></div>
+    <p class="about credit">Imagery NASA GIBS, GOES-East. Radar by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>.</p>
+  </div>
+</section>
+
+<section class="sheet" id="sheet-verses" role="dialog" aria-label="Her verses">
+  <div class="sheet-head">
+    <h2>Her <span class="em">verses</span></h2>
+    <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <div class="field">
+    <label>Add a verse or phrase</label>
+    <textarea id="cv-text" class="text-input" rows="3" maxlength="220" placeholder="Write anything you want to see drift through the sky"></textarea>
+    <input type="text" id="cv-ref" class="text-input cv-ref" maxlength="40" placeholder="Reference or signature, like Psalm 23:1 or H.">
+  </div>
+  <div class="row-actions">
+    <button class="btn sheet-close">Done</button>
+    <button class="btn primary" id="cv-save">Add to the sky</button>
+  </div>
+  <div class="field">
+    <label>Saved</label>
+    <div id="cv-list"></div>
+  </div>
+</section>
+
+<section class="sheet" id="sheet-route" role="dialog" aria-label="Sailing route">
+  <div class="sheet-head">
+    <h2>Sailing <span class="em">route</span></h2>
+    <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <div class="field">
+    <label>Add a stop</label>
+    <div class="addstop">
+      <input type="text" id="stop-input" class="text-input" placeholder="Search a town or harbor" maxlength="60">
+      <button class="btn" id="stop-add">Add</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Cruising speed</label>
+    <div class="seg" id="speed-seg">
+      <button data-v="4">4 kn</button>
+      <button data-v="5">5 kn</button>
+      <button data-v="6">6 kn</button>
+      <button data-v="7">7 kn</button>
+      <button data-v="8">8 kn</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Stops</label>
+    <div id="stop-list"></div>
+    <p class="about" id="route-total"></p>
+  </div>
+</section>
+
 <section class="sheet" id="sheet-about" role="dialog" aria-label="Settings and about">
   <div class="sheet-head">
     <h2>Garden <span class="em">settings</span></h2>
@@ -110,23 +196,30 @@
     <label>Location</label>
     <p class="about"><b id="about-loc">Beaver, PA</b></p>
     <div class="seg"><button id="use-location">Use my location</button></div>
-    <div style="display:flex;gap:8px;margin-top:12px">
+    <div class="addstop">
       <input type="text" id="city-input" class="text-input" placeholder="Search a city" maxlength="60">
-      <button class="btn" id="city-go" style="flex:0 0 auto;max-width:120px">Search</button>
+      <button class="btn" id="city-go">Search</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Sky time</label>
+    <div class="seg" id="skymode-seg">
+      <button data-v="real">Real sky</button>
+      <button data-v="cycle">Day cycle</button>
     </div>
   </div>
   <div class="field">
     <label>Preferences</label>
     <div class="seg">
       <button id="motion-toggle">Animate scene</button>
-      <button id="rotate-toggle">Rotate verses</button>
+      <button id="rotate-toggle">Drift verses</button>
     </div>
   </div>
   <div class="field about">
     <label>About</label>
-    <p>The scene follows the real sky at your location. Tonight the moon is <b id="about-moon">waxing</b>.</p>
-    <p>Live data comes from open sources that need no account: <span class="src">Open-Meteo</span> for weather and air, and a public feed for the <span class="src">space station</span>. The moon phase is computed on the device and works offline.</p>
-    <p>Scripture is the public-domain <b>King James Version</b>, chosen to echo the mood of the garden.</p>
+    <p>The scene follows the real sky at your location. Tonight the moon is <b id="about-moon">waxing</b>. Day cycle plays the whole day, sunrise to stars, in a few minutes.</p>
+    <p>Live data comes from open sources that need no account: <a class="src" href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> for weather and air, <a class="src" href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a> for rain radar, NASA GIBS for satellite views, and a public feed for the <span class="src">space station</span>. The moon phase is computed on the device and works offline.</p>
+    <p>Scripture is the public-domain <b>Berean Standard Bible</b>, chosen to echo the mood of the garden and the river.</p>
   </div>
 </section>
 
@@ -136,4 +229,3 @@
 <script src="./app.js"></script>
 </body>
 </html>
-

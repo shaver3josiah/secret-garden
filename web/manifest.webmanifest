@@ -1,7 +1,7 @@
 {
   "name": "Secret Garden",
   "short_name": "Secret Garden",
-  "description": "A living garden that breathes with real weather, sky, and the moon, with scripture at its heart.",
+  "description": "A living garden and river that breathe with real weather, sky, and the moon, with scripture drifting through the clouds.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
