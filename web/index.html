@@ -50,7 +50,10 @@
   </div>
 
   <nav class="dock" aria-label="Garden themes and tools">
-    <div class="dock-scroll" id="theme-chips"></div>
+    <button class="chip scenes-btn" id="open-scenes" aria-haspopup="dialog">
+      <svg width="17" height="17" viewBox="0 0 17 17" fill="none" aria-hidden="true"><path d="M8.5 14.5c0-5 2.6-8.4 6-10-.4 5.4-2.4 9-6 10Zm0 0c0-4-2-6.8-5.5-8 .3 4.4 2 7.2 5.5 8Zm0 0v-2.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span id="scenes-label">Scenes</span>
+    </button>
     <div class="dock-tools">
       <button class="icon-btn" id="open-verses" aria-label="Her verses">&#10077;</button>
       <button class="icon-btn" id="sail-toggle" aria-pressed="false" aria-label="Sailing mode">&#9973;</button>
@@ -195,6 +198,14 @@
     <div id="trip-list"></div>
     <p class="about" id="trip-total"></p>
   </div>
+</section>
+
+<section class="sheet" id="sheet-scenes" role="dialog" aria-label="Choose a scene">
+  <div class="sheet-head">
+    <h2>Choose a <span class="em">scene</span></h2>
+    <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <div id="scenes-list"></div>
 </section>
 
 <section class="sheet" id="sheet-compass" role="dialog" aria-label="Compass and star finder">

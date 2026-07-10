@@ -211,6 +211,7 @@
     rain = []; snow = []; petals = []; pollen = []; flies = []; clouds = [];
     const cloudN = clamp(Math.round(2 + state.weather.cloud / 16), 2, 9);
     for (let i = 0; i < cloudN; i++) clouds.push({ x: Math.random() * W * 1.2 - W * 0.1, y: (0.08 + Math.random() * 0.45) * horizonY, s: (0.6 + Math.random() * 1.1) * clamp(U / 700, 0.55, 1.25), sp: 0.004 + Math.random() * 0.01, op: 0.35 + Math.random() * 0.4 });
+    buildZenithField();
     if (k === "rain") { const n = Math.round((state.weather.code >= 80 || state.weather.code >= 63 ? 240 : 150) * scale * heavy); for (let i = 0; i < n; i++) rain.push({ x: Math.random() * W, y: Math.random() * H, len: 9 + Math.random() * 14, sp: 7 + Math.random() * 6 }); }
     if (k === "snow") { const n = Math.round(130 * scale * heavy); for (let i = 0; i < n; i++) snow.push({ x: Math.random() * W, y: Math.random() * H, r: 1 + Math.random() * 2.4, sp: 0.6 + Math.random() * 1.1, ph: Math.random() * 6.28 }); }
     if (th.ambient === "petals") { const n = Math.round(20 * scale * heavy); for (let i = 0; i < n; i++) petals.push({ x: Math.random() * W, y: Math.random() * H, r: 3 + Math.random() * 4, sp: 0.5 + Math.random() * 0.9, drift: (Math.random() - 0.5) * 0.6, rot: Math.random() * 6.28, rs: (Math.random() - 0.5) * 0.05, col: th.bloom[Math.floor(Math.random() * th.bloom.length)] }); }
@@ -304,8 +305,9 @@
 
   function drawCelestial() {
     const alt = sunAltitude();
-    const sunA = clamp(alt / 0.12, 0, 1);
-    const moonA = clamp(1 - alt / 0.14, 0, 1) * 0.92;
+    const lookUp = 1 - smooth(cam * 1.4);           // sun and moon bow out as you look overhead
+    const sunA = clamp(alt / 0.12, 0, 1) * lookUp;
+    const moonA = clamp(1 - alt / 0.14, 0, 1) * 0.92 * lookUp;
     if (moonA > 0.02) {
       const nf = nightFrac();
       const mx = celestialX(nf), my = horizonY - Math.sin(Math.PI * nf) * horizonY * 0.7 + 12;
@@ -352,30 +354,112 @@
     toast("A reminder of His power over the skies");
   }
 
-  let skyP = 0, skyTarget = 0, dragY = null, dragMoved = false;
-  function drawSkyView() {
-    if (dragY === null) skyP += (skyTarget - skyP) * 0.12;
-    if (skyP < 0.004) { skyP = 0; return; }
-    const s = skyColors();
-    ctx.save();
-    ctx.globalAlpha = skyP;
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, rgb(s.top));
-    g.addColorStop(1, rgb(mix(s.top, s.hor, 0.55)));
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    const a = clamp(1 - sunAltitude() * 4.5, 0, 1) * 0.6;
-    if (a > 0.03) {
-      ctx.fillStyle = "#FBFAF2";
-      for (const st of geo.stars) { ctx.globalAlpha = skyP * a; ctx.beginPath(); ctx.arc(st.x, (st.y / (horizonY || 1)) * H, st.r, 0, 6.2832); ctx.fill(); }
+  // ---------- look-up camera: pull the sky down over the garden ----------
+  let cam = 0, camTarget = 0, camVel = 0, dragY = null, dragMoved = false, camAt = 0;
+  let zfield = [];
+  function buildZenithField() {
+    const r = rng(4242 + Math.round(state.weather.cloud));
+    const n = Math.round(4 + state.weather.cloud / 7);
+    zfield = [];
+    const bandT = H * 0.28, bandB = H * 0.62;
+    for (let i = 0; i < n; i++) {
+      const big = i % 3 === 0;
+      const s = (big ? 1.3 + r() * 1.3 : 0.35 + r() * 0.7) * clamp(U / 700, 0.6, 1.3);
+      let y = r() * H * 1.35 - H * 0.2;
+      if (y * 1.12 > bandT && y * 1.12 < bandB) y = (r() > 0.5 ? bandB + r() * H * 0.3 : bandT - H * 0.16 - r() * H * 0.3) / 1.12;
+      zfield.push({ x: r() * W, y: y, s: s, op: 0.55 + r() * 0.4, sd: Math.floor(r() * 9999) });
     }
-    const k = cloudFade();
-    for (const c of clouds) puff(c.x, (c.y / (horizonY || 1)) * H * 0.9 + H * 0.05, c.s * 2.4, Math.min(0.8, c.op * 1.7) * skyP * k);
-    ctx.globalAlpha = skyP;
-    ctx.font = "600 12px 'DM Sans', sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillStyle = sunAltitude() > 0.09 ? "#3D4B36" : "#E9F0E2";
-    ctx.fillText("OVERHEAD · CLOUDS " + state.weather.cloud + "%" + (Date.now() < clearUntil ? " · PARTED" : ""), W / 2, 30);
+  }
+  // cumulus from overlapping circles only: uniform winding, no fill-rule bites
+  function cumulusLobes(cx, cy, w, h, seed) {
+    const r = rng(seed);
+    const lobes = [];
+    const n = 4 + Math.floor(r() * 2);
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const rr = h * (0.5 + r() * 0.5) * (1 - Math.abs(t - 0.5) * 0.22);
+      lobes.push({ x: cx - w * 0.5 + t * w, y: cy + Math.sin(t * Math.PI) * h * 0.14 - rr * 0.1 + (r() - 0.5) * h * 0.14, r: rr });
+    }
+    lobes.push({ x: cx - w * (0.1 + r() * 0.14), y: cy - h * (0.5 + r() * 0.2), r: h * (0.56 + r() * 0.2) });
+    lobes.push({ x: cx + w * (0.16 + r() * 0.12), y: cy - h * (0.38 + r() * 0.18), r: h * (0.46 + r() * 0.16) });
+    lobes.push({ x: cx + w * (0.28 + r() * 0.06), y: cy - h * (0.26 + r() * 0.1), r: h * (0.5 + r() * 0.12) });
+    lobes.push({ x: cx + w * 0.04, y: cy - h * (0.4 + r() * 0.14), r: h * (0.52 + r() * 0.14) });
+    if (r() > 0.45) lobes.push({ x: cx - w * (0.28 + r() * 0.05), y: cy - h * (0.3 + r() * 0.12), r: h * (0.44 + r() * 0.12) });
+    return lobes;
+  }
+  function traceLobes(lobes) {
+    ctx.beginPath();
+    for (const d of lobes) { ctx.moveTo(d.x + d.r, d.y); ctx.arc(d.x, d.y, d.r, 0, 6.2832); }
+  }
+  function drawCumulus(cx, cy, w, h, seed, alpha, night) {
+    const lobes = cumulusLobes(cx, cy, w, h, seed);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = night ? "rgba(228,233,243,0.97)" : "rgba(253,254,252,0.97)";
+    traceLobes(lobes); ctx.fill();
+    traceLobes(lobes); ctx.clip();
+    const g = ctx.createLinearGradient(0, cy - h * 0.7, 0, cy + h * 0.52);
+    g.addColorStop(0, "rgba(255,255,255,0.9)");
+    g.addColorStop(0.55, "rgba(255,255,255,0)");
+    g.addColorStop(1, night ? "rgba(118,132,158,0.5)" : "rgba(191,202,209,0.55)");
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - w, cy - h * 1.4, w * 2, h * 2.4);
+    const hl = ctx.createRadialGradient(cx - w * 0.18, cy - h * 0.5, 4, cx - w * 0.18, cy - h * 0.5, w * 0.4);
+    hl.addColorStop(0, night ? "rgba(246,248,254,0.5)" : "rgba(255,252,240,0.65)");
+    hl.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = hl;
+    ctx.fillRect(cx - w, cy - h * 1.4, w * 2, h * 2.4);
     ctx.restore();
+  }
+  function camOffset() { return smooth(cam) * H * 1.04; }
+  function drawZenith(oy) {
+    if (oy <= 0) return;
+    const s = skyColors(), night = isNight();
+    const g = ctx.createLinearGradient(0, 0, 0, oy);
+    g.addColorStop(0, rgb(mix(s.top, night ? [24, 34, 64] : [96, 156, 200], 0.55)));
+    g.addColorStop(1, rgb(s.top));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, oy);
+    const sa = clamp(1 - sunAltitude() * 4.5, 0, 1) * 0.6;
+    if (sa > 0.03) {
+      ctx.fillStyle = "#FBFAF2";
+      for (const st of geo.stars) { ctx.globalAlpha = smooth(cam) * sa; ctx.beginPath(); ctx.arc(st.x, (st.y / (horizonY || 1)) * H, st.r, 0, 6.2832); ctx.fill(); }
+      ctx.globalAlpha = 1;
+    }
+    const k = cloudFade(), cm = smooth(cam);
+    for (const c of zfield) {
+      const cy = c.y * 1.12 - (1 - cm) * H * 0.9;
+      if (cy < -160 || cy > oy + 160) continue;
+      drawCumulus(c.x, cy, 150 * c.s, 56 * c.s, c.sd, Math.min(1, c.op + 0.25) * smooth(cm * 2) * k, night);
+    }
+  }
+  function drawSkyHud() {
+    const a = smooth((cam - 0.25) / 0.5);
+    const night = isNight();
+    if (a > 0.02) {
+      ctx.save(); ctx.globalAlpha = a;
+      const parted = Date.now() < clearUntil;
+      const label = "L O O K I N G   U P   ·   C L O U D S   " + state.weather.cloud + "%" + (parted ? "  ·  P A R T E D" : "");
+      ctx.font = "600 11px 'DM Sans', sans-serif";
+      const tw = ctx.measureText(label).width + 34;
+      const px = W / 2 - tw / 2, py = 44;
+      ctx.fillStyle = night ? "rgba(20,28,48,0.55)" : "rgba(255,255,255,0.65)";
+      ctx.beginPath(); ctx.roundRect(px, py, tw, 30, 15); ctx.fill();
+      ctx.strokeStyle = night ? "rgba(255,255,255,0.25)" : "rgba(40,60,30,0.14)"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = night ? "#E9F0E2" : "#3D4B36";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(label, W / 2, py + 16);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    }
+    const b = (1 - smooth(cam * 3)) * (0.5 + 0.25 * Math.sin(T * 0.003));
+    if (b > 0.03 && !state.sail.on) {
+      ctx.save(); ctx.globalAlpha = b;
+      ctx.strokeStyle = isNight() ? "rgba(233,240,226,0.9)" : "rgba(61,75,54,0.75)";
+      ctx.lineWidth = 3; ctx.lineCap = "round";
+      const y0 = 10 + Math.sin(T * 0.0024) * 2.5;
+      ctx.beginPath(); ctx.moveTo(W / 2 - 13, y0); ctx.lineTo(W / 2, y0 + 6); ctx.lineTo(W / 2 + 13, y0);
+      ctx.stroke(); ctx.restore();
+    }
   }
 
   function ridgePath(pts, colorTop, colorBot) {
@@ -812,25 +896,24 @@
     const yTop = sky.y + bob;
     const a = clamp(Math.min(p / 0.1, (1 - p) / 0.1, 1), 0, 1);
     if (a <= 0.01) return;
-    const alt = sunAltitude();
-    const nightMode = alt <= 0.09;
-    const s = sky.fs / 22;
-    const vc = sky.cloud || { s: 2, dx: 0, dy: 0.4 };
-    puff(cxp + sky.tw * vc.dx, yTop + sky.lh * (sky.lines.length - 1) * vc.dy, s * vc.s, 0.16 * a);
+    const nightMode = sunAltitude() <= 0.09;
+    // the verse rides one opaque cumulus, shape seeded per verse
+    const block = sky.lines.length * sky.lh;
+    drawCumulus(cxp, yTop + block * 0.38, sky.tw * 1.16, Math.max(block * 1.32, sky.fs * 2.7), sky.cseed || 7, a, nightMode);
     ctx.save();
     ctx.globalAlpha = a;
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
     ctx.font = verseFont(sky.fs);
-    ctx.shadowColor = nightMode ? "rgba(8,14,26,0.75)" : "rgba(255,255,255,0.9)";
-    ctx.shadowBlur = sky.fs * 0.55;
-    ctx.fillStyle = nightMode ? "#F5EFDC" : "#243420";
+    ctx.shadowColor = "rgba(40,60,30,0.16)";
+    ctx.shadowBlur = sky.fs * 0.16;
+    ctx.fillStyle = nightMode ? "#2B3440" : "#243420";
     for (let i = 0; i < sky.lines.length; i++) {
       ctx.fillText(sky.lines[i], cxp, yTop + i * sky.lh);
     }
-    ctx.shadowBlur = sky.fs * 0.3;
+    ctx.shadowBlur = 0;
     ctx.font = "600 " + Math.max(11, Math.round(sky.fs * 0.44)) + "px 'DM Sans', sans-serif";
-    ctx.fillStyle = nightMode ? "#D8B26A" : "#9A7636";
+    ctx.fillStyle = "#9A7636";
     ctx.fillText(sky.ref.toUpperCase(), cxp, yTop + (sky.lines.length - 1) * sky.lh + sky.fs * 1.25);
     ctx.restore();
   }
@@ -838,7 +921,17 @@
   function frame(ts) {
     lastTs = T;
     T = ts || 0;
+    if (dragY === null && (cam > 0.0005 || camTarget > 0)) {
+      camVel += (camTarget - cam) * 0.026;          // soft spring, settles ~600ms
+      camVel *= 0.86;
+      cam = clamp(cam + camVel, 0, 1);
+      if (Math.abs(cam - camTarget) < 0.001 && Math.abs(camVel) < 0.0005) { cam = camTarget; camVel = 0; }
+    }
     ctx.clearRect(0, 0, W, H);
+    const oy = camOffset();
+    drawZenith(oy);
+    ctx.save();
+    ctx.translate(0, oy);
     drawSky();
     drawStars();
     drawCelestial();
@@ -860,11 +953,16 @@
       drawWillow();
       drawGrassesFlowers();
     }
-    drawSkyVerse();
     drawAmbient();
     drawWeather();
     drawFog();
-    drawSkyView();
+    ctx.restore();
+    ctx.save();
+    ctx.translate(0, oy * 0.35);                    // verse cloud rides mid-parallax
+    drawSkyVerse();
+    ctx.restore();
+    drawSkyHud();
+    document.body.classList.toggle("skyview", cam > 0.25);   // chrome bows out while looking up
     requestAnimationFrame(frame);
   }
 
@@ -909,7 +1007,7 @@
   function setVerse(v) {
     state.curVerse = v;
     let hsh = 0; for (let i = 0; i < v.ref.length; i++) hsh = (hsh * 31 + v.ref.charCodeAt(i)) >>> 0;
-    sky.cloud = { s: 1.6 + (hsh % 5) * 0.25, dx: -0.26 + ((hsh >> 3) % 7) * 0.085, dy: 0.15 + ((hsh >> 6) % 5) * 0.14 };
+    sky.cseed = 7 + (hsh % 9973);
     el("verse-live").textContent = v.text + " " + v.ref;
     layoutVerse();
     sky.prog = 0;
@@ -1067,20 +1165,34 @@
     toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
   }
 
+  function themeList() {
+    return PRESET_ORDER.map(id => ({ id: id, name: THEMES[id].name, th: THEMES[id] }))
+      .concat(state.custom.map(c => ({ id: "custom:" + c.id, name: c.name, th: c })));
+  }
   function buildThemeChips() {
-    const wrap = el("theme-chips"); wrap.innerHTML = "";
-    const all = PRESET_ORDER.map(id => ({ id: id, name: THEMES[id].name })).concat(state.custom.map(c => ({ id: "custom:" + c.id, name: c.name })));
-    for (const t of all) {
-      const b = document.createElement("button");
-      b.className = "chip" + (t.id === state.themeId ? " active" : "");
-      b.textContent = t.name;
-      b.onclick = () => setTheme(t.id);
-      wrap.appendChild(b);
+    // one Scenes button in the dock; the gardens live in their own sheet
+    const cur = themeList().find(t => t.id === state.themeId);
+    el("scenes-label").textContent = cur ? cur.name : "Scenes";
+    const wrap = el("scenes-list"); wrap.innerHTML = "";
+    for (const t of themeList()) {
+      const row = document.createElement("button");
+      row.className = "scene-row" + (t.id === state.themeId ? " active" : "");
+      const dot = document.createElement("span");
+      dot.className = "sw-dot";
+      dot.style.background = "linear-gradient(135deg," + t.th.foliage[1] + " 0 55%," + t.th.bloom[0] + " 55%)";
+      const name = document.createElement("b");
+      name.textContent = t.name;
+      const mark = document.createElement("span");
+      mark.className = "scene-check";
+      mark.innerHTML = t.id === state.themeId ? "<svg width='16' height='16' viewBox='0 0 16 16' fill='none'><path d='M2.5 8.5l3.4 3.4L13.5 4.3' stroke='currentColor' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/></svg>" : "";
+      row.appendChild(dot); row.appendChild(name); row.appendChild(mark);
+      row.onclick = () => { setTheme(t.id); closeSheet(); toast(t.name); };
+      wrap.appendChild(row);
     }
     const add = document.createElement("button");
-    add.className = "chip ghost";
-    add.innerHTML = "<span class='plus'>+</span>Create";
-    add.onclick = openCreator;
+    add.className = "scene-row ghost";
+    add.innerHTML = "<span class='sw-dot plus-dot'>+</span><b>Create a garden</b>";
+    add.onclick = () => { closeSheet(); openCreator(); };
     wrap.appendChild(add);
   }
   function setTheme(id) { state.themeId = id; persist(); buildThemeChips(); buildScene(); }
@@ -1180,6 +1292,19 @@
   }
 
   let compassSeen = false, starMode = false, lastHeading = 0;
+  // sensor headings arrive jumpy and late — a critically-damped spring glides the rose between them
+  let roseCur = 0, roseVel = 0, roseRaf = 0;
+  function roseLoop() {
+    const sheetOpen = el("sheet-compass").classList.contains("open");
+    const delta = ((lastHeading - roseCur + 540) % 360) - 180;  // shortest arc, wraps 359->0 cleanly
+    roseVel += delta * 0.018;
+    roseVel *= 0.88;
+    roseCur = (roseCur + roseVel + 360) % 360;
+    el("compass-rose").style.transform = "rotate(" + (-roseCur) + "deg)";
+    if (sheetOpen || Math.abs(delta) > 0.2 || Math.abs(roseVel) > 0.05) roseRaf = requestAnimationFrame(roseLoop);
+    else roseRaf = 0;
+  }
+  function startRose() { if (!roseRaf) roseRaf = requestAnimationFrame(roseLoop); }
   function compassNote() {
     if (starMode) {
       const alt = Math.round(Math.abs(state.loc.lat));
@@ -1195,11 +1320,12 @@
     if (h == null) return;
     compassSeen = true;
     lastHeading = ((h % 360) + 360) % 360;
-    el("compass-rose").style.transform = "rotate(" + (-lastHeading) + "deg)";
+    startRose();
     el("compass-note").textContent = compassNote();
   }
   function openCompass() {
     openSheet("compass");
+    startRose();
     if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) DeviceOrientationEvent.requestPermission().catch(() => {});
     el("compass-note").textContent = compassNote();
     setTimeout(() => {
@@ -1525,6 +1651,7 @@
     el("open-route").onclick = () => { renderRoute(); renderTrip(); openSheet("route"); };
     el("stop-add").onclick = addStop;
     el("stop-input").addEventListener("keydown", e => { if (e.key === "Enter") addStop(); });
+    el("open-scenes").onclick = () => { buildThemeChips(); openSheet("scenes"); };
     el("open-compass").onclick = openCompass;
     window.addEventListener("deviceorientationabsolute", onHeading);
     window.addEventListener("deviceorientation", onHeading);
@@ -1541,19 +1668,20 @@
     let tapTimer = null, lastTap = 0;
     stage.addEventListener("pointerdown", e => {
       if (e.target !== stage) return;
-      dragY = e.clientY; dragMoved = false;
+      dragY = e.clientY; dragMoved = false; camAt = cam;
+      stage.setPointerCapture(e.pointerId);        // keep the drag even when the finger wanders
     });
     stage.addEventListener("pointermove", e => {
       if (dragY === null) return;
       const dy = e.clientY - dragY;
-      if (Math.abs(dy) > 14) dragMoved = true;
-      if (dragMoved) skyP = clamp(skyTarget + dy / (H * 0.55), 0, 1);
+      if (Math.abs(dy) > 10) dragMoved = true;
+      if (dragMoved) cam = clamp(camAt + dy / (H * 0.55), 0, 1);
     });
     stage.addEventListener("pointerup", e => {
       if (dragY === null) return;
       const wasDrag = dragMoved;
       dragY = null; dragMoved = false;
-      if (wasDrag) { skyTarget = skyP > 0.4 ? 1 : 0; return; }
+      if (wasDrag) { camTarget = cam > 0.42 ? 1 : 0; camVel = 0; return; }
       const now = Date.now();
       if (now - lastTap < 320) {
         lastTap = 0;
@@ -1565,7 +1693,7 @@
       const x = e.clientX, y = e.clientY;
       tapTimer = setTimeout(() => {
         tapTimer = null;
-        if (skyTarget > 0.5 || skyP > 0.5) { skyTarget = 0; return; }
+        if (camTarget > 0.5 || cam > 0.5) { camTarget = 0; camVel = 0; return; }
         const wl = geo && geo.willow;
         if (!state.sail.on && wl && Math.abs(x - wl.x) < wl.h * 0.55 && y > wl.base - wl.h * 1.2 && y < wl.base + 16) {
           state.willowSit = !state.willowSit;
