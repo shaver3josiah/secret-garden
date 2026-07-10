@@ -280,6 +280,11 @@
     }
     ctx.strokeStyle = bark; ctx.lineWidth = h * 0.012;
     ctx.beginPath(); ctx.moveTo(x, y - h * 0.42); ctx.quadraticCurveTo(x + h * 0.1, y - h * 0.52, x + R * 0.6, cy + R * 0.2); ctx.stroke();
+    // app patch: fuller birch — three more limbs reaching into the canopy
+    ctx.beginPath(); ctx.moveTo(x, y - h * 0.3); ctx.quadraticCurveTo(x - h * 0.08, y - h * 0.42, x - R * 0.55, cy + R * 0.45); ctx.stroke();
+    ctx.lineWidth = h * 0.009;
+    ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.quadraticCurveTo(x + h * 0.06, y - h * 0.58, x + R * 0.42, cy - R * 0.1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, y - h * 0.55); ctx.quadraticCurveTo(x - h * 0.05, y - h * 0.62, x - R * 0.38, cy - R * 0.25); ctx.stroke();
     var sway = Math.sin(o.t * 0.6 + o.seed) * 2.4 * wind;
     for (var i = 0; i < 8; i++) {
       var a = r() * TAU, rr = Math.sqrt(r()) * R;
@@ -550,8 +555,8 @@
   // o: {x,y,s,dir,flap,pitch,legs,headTurn,gape,P}
   function drawRobin(ctx, o) {
     var P = o.P || PALETTES.day;
-    var back = mixHex('#8C7A66', P.fol, P.folK * 0.5);
-    var dark = mixHex('#7A6A58', P.fol, P.folK * 0.5);
+    var back = mixHex(o.blue ? '#6B8FB8' : '#8C7A66', P.fol, P.folK * 0.5);   // app patch: eastern bluebird variant
+    var dark = mixHex(o.blue ? '#54749E' : '#7A6A58', P.fol, P.folK * 0.5);
     var breast = mixHex('#C96F4A', P.fol, P.folK * 0.35);
     var belly = mixHex('#F1E9DA', P.fol, P.folK * 0.4);
     ctx.save();

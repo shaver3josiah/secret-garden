@@ -29,7 +29,7 @@
       <small>a living garden</small>
     </div>
     <div class="conditions">
-      <span class="chip-info live"><span id="cond-place">Beaver, PA</span></span>
+      <button class="chip-info live tap" id="loc-chip" aria-label="Change location"><span id="cond-place">Beaver, PA</span></button>
       <a class="chip-info tap" id="temp-link" target="_blank" rel="noopener" href="https://www.google.com/search?q=weather+Beaver+PA" aria-label="Check this temperature on Google"><span class="glyph" id="cond-wx-glyph">&#9728;&#65039;</span><span id="cond-wx-text">Clear</span></a>
       <a class="chip-info tap" id="cond-aqi" target="_blank" rel="noopener" style="display:none" aria-label="Check this air quality on Google"><span id="cond-aqi-text">Air</span></a>
     </div>
@@ -46,7 +46,7 @@
     <a class="hb-chip" id="hb-rain-link" target="_blank" rel="noopener" aria-label="Check rain forecast on Google"><span class="glyph">&#128167;</span><b id="hb-rain">--%</b></a>
     <a class="hb-chip" id="hb-wind-link" target="_blank" rel="noopener" aria-label="Check wind forecast on Google"><span class="glyph">&#127788;&#65039;</span><b id="hb-wind">--</b></a>
     <a class="hb-chip" id="hb-cloud-link" target="_blank" rel="noopener" aria-label="Check cloud cover on Google"><span class="glyph">&#9729;&#65039;</span><b id="hb-cloud">--%</b></a>
-    <button class="chip hb-open" id="open-hours">Hourly sky</button>
+    <button class="chip hb-open gold" id="open-hours"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="3.2" stroke="currentColor" stroke-width="1.6"/><path d="M8 1.6v1.7M8 12.7v1.7M1.6 8h1.7M12.7 8h1.7M3.5 3.5l1.2 1.2M11.3 11.3l1.2 1.2M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Hourly sky</button>
   </div>
 
   <nav class="dock" aria-label="Garden themes and tools">
@@ -57,7 +57,7 @@
     <div class="dock-tools">
       <button class="icon-btn" id="open-verses" aria-label="Her verses">&#10077;</button>
       <button class="icon-btn" id="sail-toggle" aria-pressed="false" aria-label="Sailing mode">&#9973;</button>
-      <button class="icon-btn" id="open-route" aria-label="Routes and road trips" style="display:none">&#9875;</button>
+      <button class="chip route-btn" id="open-route" style="display:none"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3.2a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2Zm0 0v9.2m0 0c-3 0-5.4-1.8-6-4.4l1.8.7M8 12.4c3 0 5.4-1.8 6-4.4l-1.8.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Routes</span></button>
       <button class="icon-btn" id="open-compass" aria-label="Compass and star finder">&#129517;</button>
       <button class="icon-btn" id="open-about" aria-label="Settings and about">&#9881;</button>
     </div>
@@ -122,22 +122,22 @@
     <div class="seg" id="hours-tabs">
       <button data-t="rain" class="on">Rain</button>
       <button data-t="wind">Wind</button>
-      <button data-t="sky">Satellite</button>
+      <button data-t="sky">Radar map</button>
     </div>
   </div>
   <div class="hours-panel" id="hours-rain"></div>
   <div class="hours-panel" id="hours-wind" style="display:none"></div>
   <div class="hours-panel" id="hours-sky" style="display:none">
-    <div class="sat-wrap">
-      <img id="sat-img" alt="Satellite cloud view" width="256" height="256">
-      <img id="sat-radar" alt="" width="256" height="256">
+    <div class="map-wrap">
+      <div class="map-grid" id="map-grid"></div>
+      <span class="map-pin" aria-hidden="true"></span>
     </div>
     <div class="sat-controls">
-      <input type="range" id="sat-scrub" min="-12" max="0" value="0" step="1" aria-label="Hours back">
-      <div class="sat-row"><span id="sat-time">Latest</span><button class="chip" id="radar-toggle">Rain radar on</button></div>
+      <input type="range" id="sat-scrub" min="-6" max="0" value="0" step="1" aria-label="Radar frames back">
+      <div class="sat-row"><span id="sat-time">Latest radar</span><button class="chip" id="radar-toggle">Rain radar on</button></div>
     </div>
     <div id="hours-cloud"></div>
-    <p class="about credit">Imagery NASA GIBS, GOES-East. Radar by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>.</p>
+    <p class="about credit">Map &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Radar by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>.</p>
   </div>
 </section>
 
@@ -163,8 +163,12 @@
 
 <section class="sheet" id="sheet-route" role="dialog" aria-label="Sailing route">
   <div class="sheet-head">
-    <h2>Sailing <span class="em">route</span></h2>
+    <h2>Routes &amp; <span class="em">trips</span></h2>
     <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <div class="field" id="fav-field" style="display:none">
+    <label>Favorite places</label>
+    <div class="fav-row" id="fav-list"></div>
   </div>
   <div class="field">
     <label>Add a stop</label>
@@ -216,12 +220,17 @@
   <div class="compass-wrap">
     <div class="compass-outer">
       <div class="compass-rose" id="compass-rose">
+        <canvas id="rose-canvas" width="380" height="380" aria-hidden="true"></canvas>
         <span class="cpt cn">N</span><span class="cpt ce">E</span><span class="cpt cs">S</span><span class="cpt cw">W</span>
         <span class="cstar" aria-hidden="true">&#9733;</span>
       </div>
       <div class="compass-needle" aria-hidden="true"></div>
     </div>
     <p class="about" id="compass-note"></p>
+    <div class="const-box">
+      <canvas id="const-canvas" width="520" height="220" aria-hidden="true"></canvas>
+      <p class="about" id="const-note"></p>
+    </div>
   </div>
   <div class="field">
     <div class="seg" id="compass-mode">
@@ -262,7 +271,7 @@
   <div class="field about">
     <label>About</label>
     <p>The scene follows the real sky at your location. Tonight the moon is <b id="about-moon">waxing</b>. Day cycle plays the whole day, sunrise to stars, in a few minutes.</p>
-    <p>Live data comes from open sources that need no account: <a class="src" href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> for weather and air, <a class="src" href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a> for rain radar, NASA GIBS for satellite views, <a class="src" href="https://project-osrm.org/" target="_blank" rel="noopener">OSRM</a> for road routes, and <a class="src" href="https://www.bigdatacloud.com/" target="_blank" rel="noopener">BigDataCloud</a> for the towns along the way. The moon phase and compass work on the device, offline.</p>
+    <p>Live data comes from open sources that need no account: <a class="src" href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> for weather and air, <a class="src" href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a> for rain radar, <a class="src" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> for maps, <a class="src" href="https://project-osrm.org/" target="_blank" rel="noopener">OSRM</a> for road routes, and <a class="src" href="https://www.bigdatacloud.com/" target="_blank" rel="noopener">BigDataCloud</a> for the towns along the way. The moon phase and compass work on the device, offline.</p>
     <p>Scripture is the public-domain <b>Berean Standard Bible</b>, chosen to echo the mood of the garden and the river.</p>
   </div>
 </section>
@@ -270,6 +279,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="./garden-elements.js"></script>
+<script src="./constellations.js"></script>
 <script src="./verses.js"></script>
 <script src="./app.js"></script>
 </body>

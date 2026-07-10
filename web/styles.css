@@ -692,3 +692,70 @@ a.hb-chip:hover { border-color: var(--line-warm); background: rgba(255, 255, 255
 .scenes-btn { flex: 1 1 auto; min-width: 0; justify-content: flex-start; }
 #scenes-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dock-tools { flex: 0 0 auto; }
+
+button.chip-info { cursor: pointer; font: inherit; }
+button.chip-info:hover { border-color: var(--line-warm); background: rgba(255, 255, 255, 0.72); }
+
+.hb-open.gold {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 46px;
+  padding: 10px 18px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #3a2c0c;
+  border-color: transparent;
+  background: linear-gradient(105deg, var(--honey) 0%, var(--honey-light) 45%, #F0D493 52%, var(--honey-light) 60%, var(--honey) 100%);
+  background-size: 200% 100%;
+  box-shadow: 0 8px 22px -12px rgba(180, 137, 77, 0.65);
+  animation: shimmer-drift 16s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+.hb-open.gold svg { flex: 0 0 auto; }
+
+.route-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 11px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--river);
+}
+.route-btn svg { flex: 0 0 auto; }
+
+.fav-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.fav-chip { display: inline-flex; align-items: center; gap: 6px; }
+.fav-chip .fav-star { color: var(--honey-deep); }
+.mini.fav { color: var(--ink-muted); }
+.mini.fav.on { color: var(--honey-deep); border-color: var(--line-warm); background: rgba(216, 178, 106, 0.16); }
+
+.map-wrap {
+  position: relative;
+  width: min(100%, 340px);
+  aspect-ratio: 1;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  margin: 0 auto;
+}
+.map-grid { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.map-grid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.map-grid img.radar-tile { opacity: 0.78; transition: opacity 0.3s var(--ease); }
+.map-grid.radar-off img.radar-tile { opacity: 0; }
+.map-pin {
+  position: absolute;
+  width: 14px; height: 14px;
+  border-radius: 50% 50% 50% 0;
+  transform: translate(-50%, -100%) rotate(-45deg);
+  background: var(--honey-deep);
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(40, 60, 30, 0.5);
+  pointer-events: none;
+}
+
+#rose-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.const-box { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+#const-canvas { width: 260px; height: 110px; }
+#const-note { text-align: center; font-weight: 600; color: var(--ink-soft); }

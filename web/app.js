@@ -17,9 +17,10 @@
     "cottage-border": { name: "Cottage Border", foliage: ["#3A5A2A", "#6D9A3E", "#A9C46E"], bloom: ["#E88AA0", "#EAB94C", "#D98AB0", "#F0E0A0"], ambient: "petals", water: false, density: 0.86, warmBias: 0.34 },
     "wildflower-meadow": { name: "Wildflower Meadow", foliage: ["#4A6B2E", "#7DA43C", "#B7CE77"], bloom: ["#F2C14E", "#E8899B", "#B79CD8", "#F0E68C"], ambient: "pollen", water: false, density: 0.94, warmBias: 0.2 },
     "moonlit-garden": { name: "Moonlit Garden", foliage: ["#2C4A3C", "#4E7E6A", "#8FB6A2"], bloom: ["#CBD6E6", "#DCE4EC", "#B8C9D8"], ambient: "fireflies", water: true, density: 0.6, warmBias: -0.32 },
-    "zen-garden": { name: "Zen Garden", foliage: ["#3E5A3A", "#6E8F5E", "#AEC29A"], bloom: ["#D8B26A", "#E6D3A0"], ambient: "none", water: true, density: 0.36, warmBias: -0.08 }
+    "zen-garden": { name: "Zen Garden", foliage: ["#3E5A3A", "#6E8F5E", "#AEC29A"], bloom: ["#D8B26A", "#E6D3A0"], ambient: "none", water: true, density: 0.36, warmBias: -0.08 },
+    "catskills": { name: "Catskill Evening", foliage: ["#33503F", "#5C8261", "#9AB894"], bloom: ["#CBD6E6", "#E7A9C0", "#F0E0A0"], ambient: "fireflies", water: true, density: 0.55, warmBias: -0.12, mountains: true }
   };
-  const PRESET_ORDER = ["secret-garden", "cottage-border", "wildflower-meadow", "moonlit-garden", "zen-garden"];
+  const PRESET_ORDER = ["secret-garden", "cottage-border", "wildflower-meadow", "moonlit-garden", "zen-garden", "catskills"];
 
   const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -35,6 +36,7 @@
     sun: store.sun || { sunrise: 390, sunset: 1200 },
     aqi: store.aqi != null ? store.aqi : null,
     trip: Object.assign({ from: "Norwich, NY", to: "Kingston, NY", plan: null }, store.trip || {}),
+    favs: store.favs || [],
     rv: null,
     curVerse: null,
     versePaused: false,
@@ -53,7 +55,7 @@
   }
 
   function persist() {
-    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, sun: state.sun, aqi: state.aqi, trip: state.trip });
+    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, sun: state.sun, aqi: state.aqi, trip: state.trip, favs: state.favs });
   }
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -125,6 +127,62 @@
     return "Waning crescent";
   }
 
+  const CATSKILL_LAYERS = [
+    // Layer 0 (farthest) — Slide Mountain massif / Burroughs Range: long gentle dome of Slide (4180 ft,
+    // highest Catskill) with Cornell (3860) and Wittenberg (3780) trailing east — old, rounded, unhurried.
+    {
+      name: 'farthest — Slide massif (Slide–Cornell–Wittenberg)',
+      pts: [
+        [0.00, 0.66], [0.05, 0.63], [0.10, 0.60], [0.16, 0.575], [0.22, 0.56],
+        [0.28, 0.545], [0.34, 0.52], [0.40, 0.48], [0.46, 0.44], [0.52, 0.405],
+        [0.57, 0.385], [0.62, 0.38], [0.66, 0.39], [0.70, 0.425], [0.74, 0.41],
+        [0.77, 0.425], [0.81, 0.445], [0.85, 0.43], [0.89, 0.465], [0.94, 0.53],
+        [0.97, 0.58], [1.00, 0.62]
+      ]
+    },
+    // Layer 1 — Blackhead Range "rooster comb": Thomas Cole (3940), Black Dome (3980, center, tallest),
+    // shallow col between them, deeper Lockwood Gap, then the steeper cone of Blackhead (3940).
+    {
+      name: 'Blackhead Range (Thomas Cole – Black Dome – Blackhead)',
+      pts: [
+        [0.00, 0.62], [0.05, 0.56], [0.09, 0.48], [0.13, 0.38], [0.15, 0.335],
+        [0.165, 0.32], [0.185, 0.33], [0.205, 0.365], [0.245, 0.37], [0.265, 0.325],
+        [0.29, 0.305], [0.315, 0.32], [0.335, 0.35], [0.36, 0.425], [0.40, 0.43],
+        [0.425, 0.35], [0.45, 0.318], [0.468, 0.315], [0.487, 0.34], [0.51, 0.40],
+        [0.54, 0.47], [0.58, 0.54], [0.64, 0.58], [0.72, 0.60], [0.80, 0.615],
+        [0.88, 0.60], [0.94, 0.615], [1.00, 0.63]
+      ]
+    },
+    // Layer 2 — Hunter Mountain (4040 ft): broad summit dome with the SW Hunter shoulder (3740) on its
+    // left and the Colonel's Chair spur stepping down on the right; Stony Clove Notch cuts deep to its west.
+    {
+      name: 'Hunter Mountain (broad dome + SW shoulder, Stony Clove Notch)',
+      pts: [
+        [0.00, 0.58], [0.06, 0.56], [0.12, 0.565], [0.18, 0.55], [0.24, 0.565],
+        [0.30, 0.60], [0.35, 0.635], [0.40, 0.50], [0.45, 0.38], [0.475, 0.325],
+        [0.50, 0.315], [0.52, 0.325], [0.55, 0.30], [0.58, 0.26], [0.61, 0.235],
+        [0.645, 0.225], [0.68, 0.228], [0.71, 0.245], [0.74, 0.28], [0.77, 0.33],
+        [0.80, 0.385], [0.83, 0.40], [0.86, 0.43], [0.90, 0.51], [0.94, 0.57],
+        [1.00, 0.62]
+      ]
+    },
+    // Layer 3 (nearest) — Devil's Path eastern sawtooth, west→east: Plateau (3850, long flat top),
+    // deep Mink Hollow notch, Sugarloaf (3810), Pecoy Notch, Twin (3650, double summit),
+    // Jimmy Dolan Notch, Indian Head (3573), falling away to Platte Clove.
+    {
+      name: 'nearest — Devil\'s Path (Plateau – Sugarloaf – Twin – Indian Head)',
+      pts: [
+        [0.00, 0.56], [0.03, 0.47], [0.06, 0.32], [0.085, 0.21], [0.11, 0.19],
+        [0.15, 0.185], [0.19, 0.19], [0.215, 0.24], [0.245, 0.38], [0.275, 0.52],
+        [0.30, 0.40], [0.33, 0.27], [0.352, 0.212], [0.368, 0.20], [0.384, 0.225],
+        [0.42, 0.37], [0.45, 0.46], [0.48, 0.35], [0.51, 0.27], [0.535, 0.245],
+        [0.56, 0.28], [0.585, 0.26], [0.615, 0.35], [0.645, 0.44], [0.675, 0.35],
+        [0.705, 0.295], [0.73, 0.28], [0.755, 0.30], [0.79, 0.41], [0.85, 0.56],
+        [0.90, 0.64], [0.95, 0.70], [1.00, 0.73]
+      ]
+    }
+  ];
+
   let geo = null, L = null;
   const GE = window.GardenElements;
   // continuous time-of-day palette: blend the library's dawn/day/dusk/night by real sun position
@@ -160,7 +218,7 @@
     function ridge(base, amp, step, seedShift) {
       const rr = rng(base * 100 + seedShift);
       const pts = []; let y = horizonY - base;
-      for (let x = -0.05; x <= 1.06; x += step) {
+      for (let x = -0.4; x <= 1.41; x += step) {
         y += (rr() - 0.5) * amp;
         y = clamp(y, horizonY - base - amp * 3, horizonY - base + amp * 2);
         pts.push([x * W, y]);
@@ -173,24 +231,29 @@
     const wk = clamp(W / 900, 0.45, 1.6);
     const treeN = clamp(Math.round((7 + th.density * 8) * wk), 5, 18);
     for (let i = 0; i < treeN; i++) {
-      g.trees.push({ x: (i / treeN + (r() - 0.5) * 0.05) * W, w: U * (0.05 + r() * 0.05), h: U * (0.1 + r() * 0.08), ph: r() * 6.28 });
+      g.trees.push({ x: ((i / treeN) * 1.7 - 0.35 + (r() - 0.5) * 0.05) * W, w: U * (0.05 + r() * 0.05), h: U * (0.1 + r() * 0.08), ph: r() * 6.28 });
     }
 
     // bushes only dress the river banks in sailing mode now
     const bushN = clamp(Math.round((5 + th.density * 8) * wk), 4, 16);
     for (let i = 0; i < bushN; i++) {
-      g.bushes.push({ x: r() * W, y: horizonY + (H - horizonY) * (0.12 + r() * 0.34), w: U * (0.09 + r() * 0.1), h: U * (0.05 + r() * 0.055), ph: r() * 6.28, c: r() });
+      g.bushes.push({ x: (r() * 1.7 - 0.35) * W, y: horizonY + (H - horizonY) * (0.12 + r() * 0.34), w: U * (0.09 + r() * 0.1), h: U * (0.05 + r() * 0.055), ph: r() * 6.28, c: r() });
     }
     g.bushes.sort((a, b) => a.y - b.y);
 
     // the garden itself comes from the Claude Design element library
     let seedN = 0; for (let i = 0; i < state.themeId.length; i++) seedN += state.themeId.charCodeAt(i);
     L = GE.layout.generate({
-      W: W, H: H, horizon: horizonY,
+      W: Math.round(W * 1.7), H: H, horizon: horizonY,
       seed: 13 + seedN + Math.round(th.density * 97),
-      density: 0.6 + th.density * 1.2,     // lush meadow: clusters + grass scale with the theme
+      density: 0.85 + th.density * 1.4,    // wide world: keep the meadow lush across the pan range
       pond: !!th.water, koi: 3
     });
+    const shift = W * 0.35;
+    for (const tr of L.trees) tr.x -= shift;
+    for (const f of L.flowers) f.x -= shift;
+    for (const g2 of L.grass) g2.x -= shift;
+    if (L.pond) L.pond.cx -= shift;
     if (L.trees.length && !L.trees.some(t => t.kind === "willow")) L.trees[0].kind = "willow";
     L.willow = L.trees.find(t => t.kind === "willow") || null;
     // flatten the pond into a perspective ellipse (library default is near-circular on narrow screens)
@@ -202,7 +265,7 @@
     }
 
     const starN = clamp(Math.round(90 * wk), 55, 140);
-    for (let i = 0; i < starN; i++) g.stars.push({ x: r() * W, y: r() * horizonY * 0.92, r: 0.5 + r() * 1.2, ph: r() * 6.28 });
+    for (let i = 0; i < starN; i++) g.stars.push({ x: (r() * 1.7 - 0.35) * W, y: r() * horizonY * 0.92, r: 0.5 + r() * 1.2, ph: r() * 6.28 });
 
     geo = g;
     initParticles();
@@ -255,7 +318,7 @@
     g.addColorStop(0, rgb(s.top));
     g.addColorStop(1, rgb(s.hor));
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, horizonY);
+    ctx.fillRect(-W * 0.4, 0, W * 1.8, horizonY);
   }
 
   function drawGround() {
@@ -266,7 +329,7 @@
     gg.addColorStop(0, rgb(groundFar));
     gg.addColorStop(1, rgb(groundNear));
     ctx.fillStyle = gg;
-    ctx.fillRect(0, horizonY, W, H - horizonY);
+    ctx.fillRect(-W * 0.4, horizonY, W * 1.8, H - horizonY);
   }
 
   function drawStars() {
@@ -348,15 +411,22 @@
   let clearK = 0, clearUntil = 0;
   function cloudFade() {
     const target = Date.now() < clearUntil ? 1 : 0;
-    clearK += (target - clearK) * 0.035;
+    clearK += (target - clearK) * 0.03;
     if (clearK < 0.002) clearK = 0;
     return 1 - clearK;
   }
+  function partShift(x) {
+    // clouds part like a curtain: slide away from center, barely fading
+    if (clearK < 0.01) return 0;
+    const side = x < W / 2 ? -1 : 1;
+    return side * clearK * (W * 0.62 + Math.abs(x - W / 2) * 0.4);
+  }
   function drawClouds() {
-    const k = cloudFade();
+    cloudFade();
     for (const c of clouds) {
       if (motionOn()) { c.x += c.sp * (1 + state.weather.wind / 30); if (c.x - 80 * c.s > W) c.x = -90 * c.s; }
-      if (k > 0.02) puff(c.x, c.y + 30, c.s, c.op * k);
+      const px = c.x + partShift(c.x);
+      if (px > -140 * c.s && px < W + 140 * c.s) puff(px, c.y + 30, c.s, c.op * (1 - clearK * 0.25));
     }
   }
   function partClouds() {
@@ -368,18 +438,30 @@
 
   // ---------- look-up camera: pull the sky down over the garden ----------
   let cam = 0, camTarget = 0, camVel = 0, dragY = null, dragMoved = false, camAt = 0;
+  let panX = 0, panTarget = 0, panAt = 0, dragX0 = 0, dragAxis = null;   // side-to-side peek: one screen-third each way
   let zfield = [];
   function buildZenithField() {
     const r = rng(4242 + Math.round(state.weather.cloud));
-    const n = Math.round(4 + state.weather.cloud / 7);
+    const cov = state.weather.cloud;
+    const n = Math.round(4 + cov / 5);
     zfield = [];
     const bandT = H * 0.28, bandB = H * 0.62;
+    const heavy = cov >= 85;
+    // at heavy cover, an unbroken deck of big flat cumuli owns the sky first
+    if (heavy) {
+      for (let row = 0; row < 3; row++) {
+        const ry = H * (0.12 + row * 0.38);
+        for (let cxx = -0.1; cxx <= 1.1; cxx += 0.24) {
+          zfield.push({ x: W * (cxx + (r() - 0.5) * 0.08), y: (ry + (r() - 0.5) * H * 0.1) / 1.12, s: (1.7 + r() * 0.9) * clamp(U / 700, 0.6, 1.3), op: 0.85 + r() * 0.15, sd: Math.floor(r() * 9999), deck: true });
+        }
+      }
+    }
     for (let i = 0; i < n; i++) {
       const big = i % 3 === 0;
       const s = (big ? 1.3 + r() * 1.3 : 0.35 + r() * 0.7) * clamp(U / 700, 0.6, 1.3);
       let y = r() * H * 1.35 - H * 0.2;
-      if (y * 1.12 > bandT && y * 1.12 < bandB) y = (r() > 0.5 ? bandB + r() * H * 0.3 : bandT - H * 0.16 - r() * H * 0.3) / 1.12;
-      zfield.push({ x: r() * W, y: y, s: s, op: 0.55 + r() * 0.4, sd: Math.floor(r() * 9999) });
+      if (!heavy && y * 1.12 > bandT && y * 1.12 < bandB) y = (r() > 0.5 ? bandB + r() * H * 0.3 : bandT - H * 0.16 - r() * H * 0.3) / 1.12;
+      zfield.push({ x: r() * W, y: y, s: s, op: (heavy ? 0.75 : 0.55) + r() * 0.35, sd: Math.floor(r() * 9999) });
     }
   }
   // cumulus from overlapping circles only: uniform winding, no fill-rule bites
@@ -437,11 +519,14 @@
       for (const st of geo.stars) { ctx.globalAlpha = smooth(cam) * sa; ctx.beginPath(); ctx.arc(st.x, (st.y / (horizonY || 1)) * H, st.r, 0, 6.2832); ctx.fill(); }
       ctx.globalAlpha = 1;
     }
-    const k = cloudFade(), cm = smooth(cam);
+    cloudFade();
+    const cm = smooth(cam);
     for (const c of zfield) {
       const cy = c.y * 1.12 - (1 - cm) * H * 0.9;
       if (cy < -160 || cy > oy + 160) continue;
-      drawCumulus(c.x, cy, 150 * c.s, 56 * c.s, c.sd, Math.min(1, c.op + 0.25) * smooth(cm * 2) * k, night);
+      const px = c.x + partShift(c.x);
+      if (px < -260 * c.s || px > W + 260 * c.s) continue;
+      drawCumulus(px, cy, 150 * c.s, 56 * c.s, c.sd, Math.min(1, c.op + 0.25) * smooth(cm * 2) * (1 - clearK * 0.2), night);
     }
   }
   function drawSkyHud() {
@@ -481,12 +566,42 @@
       const xc = (pts[i][0] + pts[i - 1][0]) / 2, yc = (pts[i][1] + pts[i - 1][1]) / 2;
       ctx.quadraticCurveTo(pts[i - 1][0], pts[i - 1][1], xc, yc);
     }
-    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    ctx.lineTo(W * 1.4, H); ctx.lineTo(-W * 0.4, H); ctx.closePath();
     const g = ctx.createLinearGradient(0, pts[0][1] - 40, 0, H);
     g.addColorStop(0, colorTop); g.addColorStop(1, colorBot);
     ctx.fillStyle = g; ctx.fill();
   }
+  function drawCatskills() {
+    // real Catskill profiles, far to near: Slide massif, Blackhead Range, Hunter, Devil's Path
+    const blues = [[143, 163, 194], [111, 132, 168], [81, 100, 142], [60, 76, 116]];
+    const nf = clamp(1 - sunAltitude() * 3, 0, 1);
+    const lift = [0.1, 0.065, 0.032, 0];
+    const hgt = [0.34, 0.3, 0.27, 0.24];
+    for (let i = 0; i < CATSKILL_LAYERS.length; i++) {
+      const lay = CATSKILL_LAYERS[i];
+      const baseY = horizonY - U * lift[i] + 1;
+      const hh = U * hgt[i];
+      const col = mix(blues[i], [24, 32, 54], nf * 0.55);
+      const g = ctx.createLinearGradient(0, baseY - hh, 0, baseY);
+      g.addColorStop(0, rgb(col));
+      g.addColorStop(1, rgb(mix(col, [214, 224, 236], 0.28 * (1 - nf))));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(-W * 0.4, baseY);
+      for (const p of lay.pts) ctx.lineTo((-0.35 + p[0] * 1.7) * W, baseY - (1 - p[1]) * hh);
+      ctx.lineTo(W * 1.4, baseY);
+      ctx.lineTo(W * 1.4, horizonY + 3); ctx.lineTo(-W * 0.4, horizonY + 3);
+      ctx.closePath(); ctx.fill();
+      // atmospheric haze settling at each layer's feet
+      const hz = ctx.createLinearGradient(0, baseY - hh * 0.25, 0, baseY);
+      hz.addColorStop(0, "rgba(222,232,242,0)");
+      hz.addColorStop(1, "rgba(222,232,242," + (0.2 * (1 - nf) * (1 - i * 0.22)) + ")");
+      ctx.fillStyle = hz;
+      ctx.fillRect(-W * 0.4, baseY - hh * 0.25, W * 1.8, hh * 0.25);
+    }
+  }
   function drawRidges() {
+    if (activeTheme().mountains) { drawCatskills(); return; }
     const th = activeTheme(), alt = sunAltitude();
     const hazeK = smooth(alt / 0.3);
     const far = shade(mix(hexToRgb(th.foliage[1]), hexToRgb("#cdd8d0"), 0.55), 0);
@@ -506,7 +621,7 @@
   function drawTreeline(bankOnly) {
     const th = activeTheme(), nf = clamp(1 - sunAltitude() * 3, 0, 1);
     for (const tr of geo.trees) {
-      if (bankOnly && tr.x > W * 0.2 && tr.x < W * 0.8) continue;
+      if (bankOnly && tr.x + tr.w > W * 0.2 - 4 && tr.x - tr.w < W * 0.8 + 4) continue;
       const sx = motionOn() ? Math.sin(T * 0.0004 + tr.ph) * 4 * windAmp() : 0;
       const c = shade(hexToRgb(th.foliage[0]), -0.12 * nf);
       blob(tr.x + sx, horizonY + 4, tr.w, tr.h, rgb(c));
@@ -538,16 +653,6 @@
     ctx.drawImage(gcv, 0, 0, W, H);
     drawRobinVignette(P, T * 0.001);
     drawButterflies(P, t);
-    if (state.willowSit && L.willow) {
-      const w = L.willow;
-      const px = w.x + w.h * 0.2, py = w.y - w.h * 0.5;
-      const ink = "rgba(30,42,26,0.9)";
-      ctx.fillStyle = ink; ctx.strokeStyle = ink; ctx.lineCap = "round";
-      ctx.beginPath(); ctx.arc(px, py - w.h * 0.075, w.h * 0.03, 0, 6.2832); ctx.fill();
-      ctx.lineWidth = Math.max(2, w.h * 0.018);
-      ctx.beginPath(); ctx.moveTo(px, py - w.h * 0.048); ctx.lineTo(px, py); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - w.h * 0.018, py + w.h * 0.06); ctx.moveTo(px, py); ctx.lineTo(px + w.h * 0.022, py + w.h * 0.058); ctx.stroke();
-    }
   }
   function paintFlora(g2, P, t, wind) {
     if (L.pond) {
@@ -558,7 +663,17 @@
     }
     const items = [];
     for (const tr of L.trees) items.push({ y: tr.y, d: () => GE.trees[tr.kind].draw(g2, { x: tr.x, baseY: tr.y, h: tr.h, seed: tr.seed, t: t, P: P, wind: wind }) });
-    for (const f of L.flowers) items.push({ y: f.y, d: () => GE.flowers[f.kind].draw(g2, { x: f.x, baseY: f.y, h: f.h, seed: f.seed, t: t, P: P, wind: wind }) });
+    for (const f of L.flowers) {
+      items.push({ y: f.y - 0.01, d: () => {
+        const rr = GE.rng(f.seed + 3);
+        for (let b = 0; b < 3; b++) GE.drawGrass(g2, { x: f.x + (rr() - 0.5) * f.h * 0.34, base: f.y + 2, len: f.h * (0.2 + rr() * 0.16), w: 1 + rr() * 1.3, ph: rr() * 6.28, lean: (rr() - 0.5) * 0.8, t: t, P: P, wind: wind });
+        g2.fillStyle = GE.hexA(GE.mixHex(GE.FOL[1], GE.FOL[2], 0.45), 0.9);
+        const lw = f.h * 0.1;
+        g2.beginPath(); g2.ellipse(f.x - lw * 0.8, f.y - lw * 0.25, lw, lw * 0.4, -0.7, 0, 6.2832); g2.fill();
+        g2.beginPath(); g2.ellipse(f.x + lw * 0.8, f.y - lw * 0.2, lw * 0.9, lw * 0.36, 0.7, 0, 6.2832); g2.fill();
+      } });
+      items.push({ y: f.y, d: () => GE.flowers[f.kind].draw(g2, { x: f.x, baseY: f.y, h: f.h, seed: f.seed, t: t, P: P, wind: wind }) });
+    }
     for (const g of L.grass) items.push({ y: g.base, d: () => GE.drawGrass(g2, { x: g.x, base: g.base, len: g.len, w: g.w, ph: g.ph, lean: g.lean, t: t, P: P, wind: wind }) });
     items.sort((a, b) => a.y - b.y);
     for (const it of items) it.d();
@@ -600,7 +715,7 @@
       const k = smooth((tl - 28) / 3);
       pose = { x: lerp(edge.x, W + 40, k), y: lerp(edge.y, horizonY * 0.15, smooth(k)), dir: 1, fly: true, flap: Math.sin(t * 15) * 0.8, pitch: -0.15 };
     }
-    if (pose) { pose.s = s * 0.62; pose.P = P; GE.drawRobin(ctx, pose); }
+    if (pose) { pose.s = s * 0.62; pose.P = P; pose.blue = Math.floor(t / 40) % 2 === 1; GE.drawRobin(ctx, pose); }
   }
 
   const bflies = [{ sd: 3, ox: 0.3, oy: 0.55 }, { sd: 8, ox: 0.7, oy: 0.62 }];
@@ -622,7 +737,7 @@
     g.addColorStop(0, rgb(top));
     g.addColorStop(1, rgb(bot));
     ctx.fillStyle = g;
-    ctx.fillRect(0, horizonY, W, H - horizonY);
+    ctx.fillRect(-W * 0.4, horizonY, W * 1.8, H - horizonY);
     const frac = isNight() ? nightFrac() : dayFrac();
     const gx = celestialX(frac);
     const glow = isNight() ? "rgba(244,240,214," : "rgba(255,242,200,";
@@ -641,8 +756,8 @@
       const off = motionOn() ? Math.sin(T * 0.0012 + i * 1.7) * (6 + i) : 0;
       ctx.globalAlpha = 0.32 - i * 0.02;
       ctx.beginPath();
-      ctx.moveTo(0, yy);
-      ctx.quadraticCurveTo(W * 0.5 + off, yy + 2, W, yy);
+      ctx.moveTo(-W * 0.4, yy);
+      ctx.quadraticCurveTo(W * 0.5 + off, yy + 2, W * 1.4, yy);
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
@@ -656,19 +771,19 @@
     gL.addColorStop(0, rgb(mid)); gL.addColorStop(1, rgb(deep));
     ctx.fillStyle = gL;
     ctx.beginPath();
-    ctx.moveTo(0, horizonY + 1);
+    ctx.moveTo(-W * 0.4, horizonY + 1);
     ctx.lineTo(W * 0.2, horizonY + 1);
     ctx.quadraticCurveTo(W * 0.12, H * 0.75, W * 0.07, H);
-    ctx.lineTo(0, H);
+    ctx.lineTo(-W * 0.4, H);
     ctx.closePath(); ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(W, horizonY + 1);
+    ctx.moveTo(W * 1.4, horizonY + 1);
     ctx.lineTo(W * 0.8, horizonY + 1);
     ctx.quadraticCurveTo(W * 0.88, H * 0.75, W * 0.93, H);
-    ctx.lineTo(W, H);
+    ctx.lineTo(W * 1.4, H);
     ctx.closePath(); ctx.fill();
     for (const b of geo.bushes) {
-      const onLeft = b.x < W * 0.2, onRight = b.x > W * 0.8;
+      const onLeft = b.x + b.w * 0.9 < W * 0.2, onRight = b.x - b.w * 0.9 > W * 0.8;
       if (!onLeft && !onRight) continue;
       const c = shade(hexToRgb(th.foliage[b.c < 0.5 ? 1 : 0]), -0.14 * nf);
       blob(b.x, b.y, b.w * 0.8, b.h * 0.8, rgb(c));
@@ -766,7 +881,7 @@
       g.addColorStop(0, "rgba(226,230,228,0)");
       g.addColorStop(0.5, "rgba(226,230,228," + (haze * 0.7) + ")");
       g.addColorStop(1, "rgba(214,220,216," + haze + ")");
-      ctx.fillStyle = g; ctx.fillRect(0, horizonY - H * 0.2, W, H - horizonY + H * 0.2);
+      ctx.fillStyle = g; ctx.fillRect(-W * 0.4, horizonY - H * 0.2, W * 1.8, H - horizonY + H * 0.2);
     }
     if (state.weather.code >= 95 && motionOn()) {
       if (Math.random() < 0.004) flashT = 1;
@@ -782,7 +897,7 @@
     const g = ctx.createRadialGradient(sx, horizonY * 0.2, 0, sx, horizonY * 0.2, H * 0.9);
     g.addColorStop(0, "rgba(255,246,214," + (0.1 * smooth(alt / 0.4)) + ")");
     g.addColorStop(1, "rgba(255,246,214,0)");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = g; ctx.fillRect(-W * 0.4, 0, W * 1.8, H);
   }
 
   const sky = { lines: [], ref: "", fs: 24, lh: 32, tw: 0, prog: 0, y: 160 };
@@ -822,7 +937,9 @@
     }
     if (!driftActive()) sky.prog = 0.5;
     const p = sky.prog;
-    const cxp = (W + sky.tw) * (1 - p) - sky.tw / 2;
+    // quick entrance, slow crossing, quick exit
+    const pe = 0.26 * p + 0.74 * (0.5 + 4 * Math.pow(p - 0.5, 3));
+    const cxp = (W + sky.tw) * (1 - pe) - sky.tw / 2;
     const bob = motionOn() ? Math.sin(T * 0.0006) * U * 0.012 : 0;
     const yTop = sky.y + bob;
     const a = clamp(Math.min(p / 0.1, (1 - p) / 0.1, 1), 0, 1);
@@ -858,11 +975,12 @@
       cam = clamp(cam + camVel, 0, 1);
       if (Math.abs(cam - camTarget) < 0.001 && Math.abs(camVel) < 0.0005) { cam = camTarget; camVel = 0; }
     }
+    if (dragAxis !== "h") panX += (panTarget - panX) * 0.12;
     ctx.clearRect(0, 0, W, H);
     const oy = camOffset();
     drawZenith(oy);
     ctx.save();
-    ctx.translate(0, oy);
+    ctx.translate(-panX, oy);
     drawSky();
     drawStars();
     drawCelestial();
@@ -881,10 +999,10 @@
       daylightWash();
       drawGardenScene();
     }
+    ctx.restore();
     drawAmbient();
     drawWeather();
     drawFog();
-    ctx.restore();
     ctx.save();
     ctx.translate(0, oy * 0.35);                    // verse cloud rides mid-parallax
     drawSkyVerse();
@@ -1009,7 +1127,7 @@
       const r = await fetch("https://api.rainviewer.com/public/weather-maps.json"); if (!r.ok) return;
       const j = await r.json();
       if (j.radar && j.radar.past && j.radar.past.length) {
-        state.rv = { host: j.host, path: j.radar.past[j.radar.past.length - 1].path };
+        state.rv = { host: j.host, frames: j.radar.past.slice(-7) };
         updateSat();
       }
     } catch (e) {}
@@ -1036,34 +1154,42 @@
   }
   function refreshData() { fetchWeather(); fetchAqi(); fetchRadar(); }
 
-  function tileXY(lat, lon, z) {
+  // radar over an OpenStreetMap 2x2 tile grid centered on her location, with a pin
+  function mercXY(lat, lon, z) {
     const n = Math.pow(2, z);
-    const x = Math.floor((lon + 180) / 360 * n);
+    const xf = (lon + 180) / 360 * n;
     const rad = lat * Math.PI / 180;
-    const y = Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n);
-    return { x: clamp(x, 0, n - 1), y: clamp(y, 0, n - 1) };
+    const yf = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n;
+    return { xf: xf, yf: yf, n: n };
   }
-  function gibsTime(hoursBack) {
-    const d = new Date(Date.now() - 25 * 60000 - hoursBack * 3600000);
-    if (hoursBack > 0) d.setUTCMinutes(0, 0, 0);
-    else d.setUTCMinutes(Math.floor(d.getUTCMinutes() / 10) * 10, 0, 0);
-    return d.toISOString().slice(0, 19) + "Z";
-  }
-  let satFellBack = false;
   function updateSat() {
-    const z = 6, t = tileXY(state.loc.lat, state.loc.lon, z);
-    const hb = -(+el("sat-scrub").value);
-    const time = gibsTime(hb);
-    satFellBack = false;
-    el("sat-img").src = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GOES-East_ABI_GeoColor/default/" + time + "/GoogleMapsCompatible_Level7/" + z + "/" + t.y + "/" + t.x + ".png";
-    el("sat-time").textContent = hb === 0 ? "Latest view" : hb + "h ago";
-    if (state.rv) el("sat-radar").src = state.rv.host + state.rv.path + "/256/" + z + "/" + t.x + "/" + t.y + "/2/1_1.png";
-  }
-  function satError() {
-    if (satFellBack) return;
-    satFellBack = true;
-    const z = 6, t = tileXY(state.loc.lat, state.loc.lon, z);
-    el("sat-img").src = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GOES-East_ABI_GeoColor/default/default/GoogleMapsCompatible_Level7/" + z + "/" + t.y + "/" + t.x + ".png";
+    const grid = el("map-grid"); if (!grid) return;
+    const z = 7, m = mercXY(state.loc.lat, state.loc.lon, z);
+    const tx0 = Math.floor(m.xf - 0.5), ty0 = Math.floor(m.yf - 0.5);
+    const frames = state.rv && state.rv.frames || [];
+    el("sat-scrub").min = -(Math.max(1, frames.length) - 1);
+    const idx = frames.length ? clamp(frames.length - 1 + (+el("sat-scrub").value), 0, frames.length - 1) : -1;
+    const fr = idx >= 0 ? frames[idx] : null;
+    grid.innerHTML = "";
+    for (let gy = 0; gy < 2; gy++) for (let gx = 0; gx < 2; gx++) {
+      const txx = ((tx0 + gx) % m.n + m.n) % m.n, tyy = clamp(ty0 + gy, 0, m.n - 1);
+      const base = document.createElement("img");
+      base.alt = ""; base.loading = "lazy";
+      base.src = "https://tile.openstreetmap.org/" + z + "/" + txx + "/" + tyy + ".png";
+      base.style.gridArea = (gy + 1) + " / " + (gx + 1);
+      grid.appendChild(base);
+      if (fr) {
+        const rad = document.createElement("img");
+        rad.alt = ""; rad.className = "radar-tile";
+        rad.src = state.rv.host + fr.path + "/256/" + z + "/" + txx + "/" + tyy + "/2/1_1.png";
+        rad.style.gridArea = (gy + 1) + " / " + (gx + 1);
+        grid.appendChild(rad);
+      }
+    }
+    grid.classList.toggle("radar-off", el("radar-toggle").textContent.indexOf("off") >= 0);
+    const pin = document.querySelector(".map-pin");
+    if (pin) { pin.style.left = ((m.xf - tx0) / 2 * 100) + "%"; pin.style.top = ((m.yf - ty0) / 2 * 100) + "%"; }
+    el("sat-time").textContent = fr ? (Math.max(0, Math.round((Date.now() / 1000 - fr.time) / 60)) + " min ago") : "Radar loading";
   }
 
   function hourLabel(t, i) { return i === 0 ? "Now" : t.slice(11, 16); }
@@ -1247,12 +1373,72 @@
     else if (e.alpha != null && (e.absolute || e.type === "deviceorientationabsolute")) h = 360 - e.alpha;
     if (h == null) return;
     compassSeen = true;
+    const prevH = lastHeading;
     lastHeading = ((h % 360) + 360) % 360;
     startRose();
     el("compass-note").textContent = compassNote();
+    if (Math.abs(((lastHeading - prevH + 540) % 360) - 180) > 4) drawConstPreview();
+  }
+  let skyList = [], skyAt = 0;
+  function refreshSkyList() {
+    if (!window.Constellations) return;
+    skyList = Constellations.list(state.loc.lat, state.loc.lon, new Date());
+    skyAt = Date.now();
+    drawRoseGlyphs();
+  }
+  function drawRoseGlyphs() {
+    const c = el("rose-canvas"); if (!c || !skyList.length) return;
+    const g = c.getContext("2d");
+    g.setTransform(2, 0, 0, 2, 0, 0);
+    g.clearRect(0, 0, 190, 190);
+    const cx = 95, cy = 95, rad = 64;
+    for (const sc of skyList) {
+      if (!sc.up) continue;
+      const a = (sc.az - 90) * Math.PI / 180;   // dial frame: 0 deg = N = top of the rose
+      const gx = cx + Math.cos(a) * rad, gy = cy + Math.sin(a) * rad;
+      const box = 20;
+      g.strokeStyle = "rgba(154,118,54,0.75)";
+      g.fillStyle = "rgba(154,118,54,0.9)";
+      g.lineWidth = 1;
+      for (const ln of sc.preview.lines) {
+        const p1 = sc.preview.pts[ln[0]], p2 = sc.preview.pts[ln[1]];
+        g.beginPath();
+        g.moveTo(gx - box / 2 + p1[0] * box, gy - box / 2 + p1[1] * box);
+        g.lineTo(gx - box / 2 + p2[0] * box, gy - box / 2 + p2[1] * box);
+        g.stroke();
+      }
+      for (const p of sc.preview.pts) {
+        g.beginPath(); g.arc(gx - box / 2 + p[0] * box, gy - box / 2 + p[1] * box, 1.1, 0, 6.2832); g.fill();
+      }
+      g.font = "600 7px 'DM Sans', sans-serif";
+      g.textAlign = "center";
+      g.fillStyle = "rgba(61,75,54,0.85)";
+      g.fillText(sc.name.slice(0, 3).toUpperCase(), gx, gy + box / 2 + 8);
+    }
+  }
+  function drawConstPreview() {
+    const c = el("const-canvas"); if (!c || !window.Constellations) return;
+    if (!skyList.length || Date.now() - skyAt > 60000) refreshSkyList();
+    const near = Constellations.nearest(skyList, lastHeading);
+    const g = c.getContext("2d");
+    g.setTransform(2, 0, 0, 2, 0, 0);
+    g.clearRect(0, 0, 260, 110);
+    if (!near) { el("const-note").textContent = "No bright constellation is up that way just now."; return; }
+    const box = 84, gx = 130 - box / 2, gy = 55 - box / 2 + 4;
+    g.strokeStyle = "#9A7636"; g.lineWidth = 1.6; g.lineCap = "round";
+    for (const ln of near.preview.lines) {
+      const p1 = near.preview.pts[ln[0]], p2 = near.preview.pts[ln[1]];
+      g.beginPath(); g.moveTo(gx + p1[0] * box, gy + p1[1] * box); g.lineTo(gx + p2[0] * box, gy + p2[1] * box); g.stroke();
+    }
+    g.fillStyle = "#B4894D";
+    for (const p of near.preview.pts) { g.beginPath(); g.arc(gx + p[0] * box, gy + p[1] * box, 2.4, 0, 6.2832); g.fill(); }
+    const alt = near.alt < 25 ? "low" : near.alt < 55 ? "midway up" : "high overhead";
+    el("const-note").textContent = near.name + " — " + alt + " toward the " + compassPt(near.az) + (compassSeen ? ", close to where she is facing" : "");
   }
   function openCompass() {
     openSheet("compass");
+    refreshSkyList();
+    drawConstPreview();
     startRose();
     if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) DeviceOrientationEvent.requestPermission().catch(() => {});
     el("compass-note").textContent = compassNote();
@@ -1419,6 +1605,34 @@
     g.font = "600 9px 'DM Sans', sans-serif";
     g.fillText("wind mph, tick is gust", padL + 2, wTop + 2);
   }
+  function favKey(o) { return o.name; }
+  function isFav(name) { return state.favs.some(f => f.name === name); }
+  function toggleFav(stop) {
+    const i = state.favs.findIndex(f => f.name === stop.name);
+    if (i >= 0) state.favs.splice(i, 1);
+    else state.favs.push({ name: stop.name, lat: stop.lat, lon: stop.lon });
+    persist(); renderFavs(); renderRoute();
+  }
+  function renderFavs() {
+    const field = el("fav-field"), wrap = el("fav-list");
+    if (!field) return;
+    field.style.display = state.favs.length ? "" : "none";
+    wrap.innerHTML = "";
+    state.favs.forEach(f => {
+      const c = document.createElement("button");
+      c.className = "chip fav-chip";
+      c.innerHTML = "<span class='fav-star'>★</span>" + f.name.split(",")[0];
+      c.title = "Add " + f.name + " as a stop";
+      c.onclick = () => {
+        if (state.sail.stops.some(st => st.name === f.name)) { toast("Already on the route"); return; }
+        const stop = { id: "s" + Date.now().toString(36), name: f.name, lat: f.lat, lon: f.lon, temp: null, wind: null, code: null };
+        state.sail.stops.push(stop);
+        persist(); renderRoute(); fetchStopWx(stop);
+        toast("Added " + f.name.split(",")[0]);
+      };
+      wrap.appendChild(c);
+    });
+  }
   function renderRoute() {
     const wrap = el("stop-list");
     const stops = state.sail.stops;
@@ -1464,6 +1678,11 @@
       }
       sm.textContent = leg + (s.temp != null ? s.temp + "° · wind " + s.wind + " mph" : "fetching sky...");
       main.appendChild(b); main.appendChild(sm);
+      const fav = document.createElement("button");
+      fav.className = "mini fav" + (isFav(s.name) ? " on" : "");
+      fav.setAttribute("aria-label", isFav(s.name) ? "Remove favorite" : "Save favorite");
+      fav.textContent = isFav(s.name) ? "★" : "☆";
+      fav.onclick = () => toggleFav(s);
       const exp = document.createElement("button");
       exp.className = "mini";
       exp.textContent = openStopId === s.id ? "Hide" : "Hours";
@@ -1477,7 +1696,7 @@
       del.setAttribute("aria-label", "Remove stop");
       del.textContent = "×";
       del.onclick = () => { if (openStopId === s.id) openStopId = null; state.sail.stops.splice(i, 1); persist(); renderRoute(); };
-      row.appendChild(mv); row.appendChild(main); row.appendChild(exp); row.appendChild(go); row.appendChild(del);
+      row.appendChild(mv); row.appendChild(main); row.appendChild(fav); row.appendChild(exp); row.appendChild(go); row.appendChild(del);
       wrap.appendChild(row);
       if (openStopId === s.id) {
         const ex = document.createElement("div");
@@ -1567,7 +1786,6 @@
       if (b.dataset.t === "sky") updateSat();
     });
     el("sat-scrub").oninput = updateSat;
-    el("sat-img").onerror = satError;
     el("radar-toggle").onclick = () => {
       const r = el("sat-radar");
       r.classList.toggle("on");
@@ -1576,7 +1794,8 @@
     el("open-verses").onclick = () => { renderCvList(); openSheet("verses"); };
     el("cv-save").onclick = saveCustomVerse;
     el("sail-toggle").onclick = () => setSailing(!state.sail.on);
-    el("open-route").onclick = () => { renderRoute(); renderTrip(); openSheet("route"); };
+    el("open-route").onclick = () => { renderRoute(); renderTrip(); renderFavs(); openSheet("route"); };
+    el("loc-chip").onclick = openAbout;
     el("stop-add").onclick = addStop;
     el("stop-input").addEventListener("keydown", e => { if (e.key === "Enter") addStop(); });
     el("open-scenes").onclick = () => { buildThemeChips(); openSheet("scenes"); };
@@ -1587,6 +1806,7 @@
       starMode = b.dataset.v === "star";
       document.querySelectorAll("#compass-mode button").forEach(x => x.classList.toggle("on", x === b));
       el("compass-note").textContent = compassNote();
+      drawConstPreview();
     });
     el("trip-go").onclick = planTrip;
     el("trip-from").addEventListener("keydown", e => { if (e.key === "Enter") planTrip(); });
@@ -1596,20 +1816,33 @@
     let tapTimer = null, lastTap = 0;
     stage.addEventListener("pointerdown", e => {
       if (e.target !== stage) return;
-      dragY = e.clientY; dragMoved = false; camAt = cam;
+      dragY = e.clientY; dragX0 = e.clientX; dragMoved = false; dragAxis = null;
+      camAt = cam; panAt = panX;
       stage.setPointerCapture(e.pointerId);        // keep the drag even when the finger wanders
     });
     stage.addEventListener("pointermove", e => {
       if (dragY === null) return;
-      const dy = e.clientY - dragY;
-      if (Math.abs(dy) > 10) dragMoved = true;
-      if (dragMoved) cam = clamp(camAt + dy / (H * 0.55), 0, 1);
+      const dy = e.clientY - dragY, dx = e.clientX - dragX0;
+      if (!dragAxis && (Math.abs(dy) > 10 || Math.abs(dx) > 10)) {
+        dragAxis = Math.abs(dy) >= Math.abs(dx) ? "v" : "h";
+        dragMoved = true;
+      }
+      if (dragAxis === "v") cam = clamp(camAt + dy / (H * 0.55), 0, 1);
+      else if (dragAxis === "h" && cam < 0.3) panX = clamp(panAt - dx, -W * 0.35, W * 0.35);
     });
     stage.addEventListener("pointerup", e => {
       if (dragY === null) return;
-      const wasDrag = dragMoved;
-      dragY = null; dragMoved = false;
-      if (wasDrag) { camTarget = cam > 0.42 ? 1 : 0; camVel = 0; return; }
+      const wasDrag = dragMoved, axis = dragAxis;
+      dragY = null; dragMoved = false; dragAxis = null;
+      if (wasDrag) {
+        if (axis === "v") { camTarget = cam > 0.42 ? 1 : 0; camVel = 0; }
+        else {
+          // three gentle detents: left peek, home, right peek
+          const d = W * 0.35;
+          panTarget = panX < -d * 0.45 ? -d : panX > d * 0.45 ? d : 0;
+        }
+        return;
+      }
       const now = Date.now();
       if (now - lastTap < 320) {
         lastTap = 0;
@@ -1622,16 +1855,10 @@
       tapTimer = setTimeout(() => {
         tapTimer = null;
         if (camTarget > 0.5 || cam > 0.5) { camTarget = 0; camVel = 0; return; }
-        const wl = L && L.willow;
-        if (!state.sail.on && wl && Math.abs(x - wl.x) < wl.h * 0.55 && y > wl.y - wl.h * 1.2 && y < wl.y + 16) {
-          state.willowSit = !state.willowSit;
-          toast(state.willowSit ? "She settles into the willow" : "Down from the branches");
-          return;
-        }
         if (y < horizonY) setVerse(pickVerse());
       }, 300);
     });
-    stage.addEventListener("pointercancel", () => { dragY = null; dragMoved = false; });
+    stage.addEventListener("pointercancel", () => { dragY = null; dragMoved = false; dragAxis = null; });
   }
 
   function registerSW() {
