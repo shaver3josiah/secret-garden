@@ -1,9 +1,10 @@
-const CACHE = "secret-garden-v6";
+const CACHE = "secret-garden-v7";
 const SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./garden-elements.js",
   "./verses.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",

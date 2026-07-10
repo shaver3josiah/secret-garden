@@ -125,7 +125,33 @@
     return "Waning crescent";
   }
 
-  let geo = null;
+  let geo = null, L = null;
+  const GE = window.GardenElements;
+  // continuous time-of-day palette: blend the library's dawn/day/dusk/night by real sun position
+  function gePalette() {
+    const pal = GE.palettes, alt = sunAltitude(), tw = twilight();
+    const m = nowMin(), sr = state.sun.sunrise, ss = state.sun.sunset;
+    const dawnish = Math.abs(m - sr) < Math.abs(m - ss);
+    const twP = dawnish ? pal.dawn : pal.dusk;
+    let A, Bp, k;
+    if (alt <= 0.02) { A = pal.night; Bp = twP; k = tw; }
+    else { A = twP; Bp = pal.day; k = smooth(alt / 0.35); }
+    const mF = f => GE.mixHex(A[f], Bp[f], k);
+    const th = activeTheme();
+    GE.FOL[0] = th.foliage[0]; GE.FOL[1] = th.foliage[1]; GE.FOL[2] = th.foliage[2];
+    const P = {
+      key: "blend", night: isNight(),
+      skyTop: mF("skyTop"), skyMid: mF("skyMid"), skyBot: mF("skyBot"),
+      fol: GE.mixHex(A.fol, Bp.fol, k), folK: lerp(A.folK, Bp.folK, k),
+      bloom: GE.mixHex(A.bloom || "#FFFFFF", Bp.bloom || "#FFFFFF", k), bloomK: lerp(A.bloomK, Bp.bloomK, k),
+      waterHi: mF("waterHi"), waterLo: mF("waterLo")
+    };
+    if (th.warmBias) {
+      P.bloom = GE.mixHex(P.bloom, th.warmBias > 0 ? "#F4CAA8" : "#CBD6E6", Math.abs(th.warmBias) * 0.5);
+      P.bloomK = Math.max(P.bloomK, Math.abs(th.warmBias) * 0.3);
+    }
+    return P;
+  }
   function buildScene() {
     const th = activeTheme();
     const r = rng(1337 + Math.round(th.density * 1000));
@@ -150,44 +176,30 @@
       g.trees.push({ x: (i / treeN + (r() - 0.5) * 0.05) * W, w: U * (0.05 + r() * 0.05), h: U * (0.1 + r() * 0.08), ph: r() * 6.28 });
     }
 
-    if (th.water) {
-      const py = horizonY + (H - horizonY) * 0.3;
-      g.pond = { cx: W * (0.5 + (r() - 0.5) * 0.2), cy: py, rx: Math.min(W * 0.3, U * 0.36), ry: (H - horizonY) * 0.12 };
-    }
-    function inPond(x, y, pad) {
-      if (!g.pond) return false;
-      const p = g.pond, dx = (x - p.cx) / (p.rx + pad), dy = (y - p.cy) / (p.ry + pad);
-      return dx * dx + dy * dy < 1;
-    }
+    // bushes only dress the river banks in sailing mode now
     const bushN = clamp(Math.round((5 + th.density * 8) * wk), 4, 16);
     for (let i = 0; i < bushN; i++) {
-      const w = U * (0.09 + r() * 0.1), h = U * (0.05 + r() * 0.055);
-      let x = 0, y = 0, tries = 0;
-      do { x = r() * W; y = horizonY + (H - horizonY) * (0.12 + r() * 0.34); tries++; } while (inPond(x, y - h * 0.5, w) && tries < 9);
-      if (inPond(x, y - h * 0.5, w)) continue;
-      g.bushes.push({ x: x, y: y, w: w, h: h, ph: r() * 6.28, c: r() });
+      g.bushes.push({ x: r() * W, y: horizonY + (H - horizonY) * (0.12 + r() * 0.34), w: U * (0.09 + r() * 0.1), h: U * (0.05 + r() * 0.055), ph: r() * 6.28, c: r() });
     }
     g.bushes.sort((a, b) => a.y - b.y);
 
-    const grassN = Math.round((70 + th.density * 220) * wk);
-    for (let i = 0; i < grassN; i++) {
-      const gx = r() * W * 1.02, gb = horizonY + (H - horizonY) * (0.4 + r() * 0.62);
-      if (inPond(gx, gb, 0)) continue;
-      g.grasses.push({ x: gx, base: gb, len: U * (0.05 + r() * 0.12), w: 1 + r() * 2.2, ph: r() * 6.28, lean: (r() - 0.5) * 0.5 });
+    // the garden itself comes from the Claude Design element library
+    let seedN = 0; for (let i = 0; i < state.themeId.length; i++) seedN += state.themeId.charCodeAt(i);
+    L = GE.layout.generate({
+      W: W, H: H, horizon: horizonY,
+      seed: 13 + seedN + Math.round(th.density * 97),
+      density: 0.6 + th.density * 1.2,     // lush meadow: clusters + grass scale with the theme
+      pond: !!th.water, koi: 3
+    });
+    if (L.trees.length && !L.trees.some(t => t.kind === "willow")) L.trees[0].kind = "willow";
+    L.willow = L.trees.find(t => t.kind === "willow") || null;
+    // flatten the pond into a perspective ellipse (library default is near-circular on narrow screens)
+    if (L.pond) {
+      L.pond.rx = Math.min(W * 0.24, 190); L.pond.ry = Math.min((H - horizonY) * 0.13, L.pond.rx * 0.55);
+      const inP = (x, y, m) => { const dx = (x - L.pond.cx) / (L.pond.rx + m), dy = (y - L.pond.cy) / (L.pond.ry + m * 0.6); return dx * dx + dy * dy < 1; };
+      L.flowers = L.flowers.filter(f => !inP(f.x, f.y, 26));
+      L.grass = L.grass.filter(g => !inP(g.x, g.base, 12));
     }
-    g.grasses.sort((a, b) => a.base - b.base);
-
-    // ponytail: 10x flower density, capped at 480 so petal fills stay under ~3.5k/frame on phones
-    const flowerN = clamp(Math.round((120 + th.density * 340) * wk), 60, 480);
-    for (let i = 0; i < flowerN; i++) {
-      const fx = r() * W, fb = horizonY + (H - horizonY) * (0.42 + r() * 0.56);
-      if (inPond(fx, fb, 0)) continue;
-      g.flowers.push({ x: fx, base: fb, h: U * (0.08 + r() * 0.15), ph: r() * 6.28, br: U * (0.012 + r() * 0.014), col: Math.floor(r() * th.bloom.length), petals: 5 + Math.floor(r() * 3), lean: (r() - 0.5) * 0.4 });
-    }
-    g.flowers.sort((a, b) => a.base - b.base);
-
-    const wxSide = g.pond && g.pond.cx < W * 0.5 ? 0.82 : 0.18;
-    g.willow = { x: W * (wxSide + (r() - 0.5) * 0.05), base: horizonY + (H - horizonY) * 0.68, h: U * 0.44, ph: r() * 6.28 };
 
     const starN = clamp(Math.round(90 * wk), 55, 140);
     for (let i = 0; i < starN; i++) g.stars.push({ x: r() * W, y: r() * horizonY * 0.92, r: 0.5 + r() * 1.2, ph: r() * 6.28 });
@@ -501,123 +513,103 @@
     }
   }
 
-  function drawPond() {
-    if (!geo.pond) return;
-    const p = geo.pond, s = skyColors();
-    ctx.save();
-    ctx.beginPath();
-    ctx.ellipse(p.cx, p.cy, p.rx, p.ry, 0, 0, 6.2832);
-    ctx.clip();
-    const g = ctx.createLinearGradient(0, p.cy - p.ry, 0, p.cy + p.ry);
-    g.addColorStop(0, rgb(mix(s.hor, [255, 255, 255], 0.15)));
-    g.addColorStop(1, rgb(mix(s.top, [40, 60, 40], 0.25)));
-    ctx.fillStyle = g;
-    ctx.fillRect(p.cx - p.rx, p.cy - p.ry, p.rx * 2, p.ry * 2);
-    ctx.globalAlpha = 0.5;
-    ctx.strokeStyle = "rgba(255,255,255,0.5)";
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 5; i++) {
-      const yy = p.cy - p.ry + (i + 0.5) / 5 * p.ry * 2;
-      const off = motionOn() ? Math.sin(T * 0.0016 + i) * 5 : 0;
-      ctx.beginPath();
-      ctx.moveTo(p.cx - p.rx, yy);
-      ctx.quadraticCurveTo(p.cx + off, yy + 2, p.cx + p.rx, yy);
-      ctx.stroke();
-    }
-    ctx.restore();
-    ctx.globalAlpha = 0.5;
-    ctx.strokeStyle = rgb(shade(hexToRgb(activeTheme().foliage[0]), 0.1));
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.ellipse(p.cx, p.cy, p.rx, p.ry, 0, 0, 6.2832); ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-
-  function drawBushes() {
-    const th = activeTheme(), nf = clamp(1 - sunAltitude() * 2.6, 0, 1);
-    for (const b of geo.bushes) {
-      const sx = motionOn() ? Math.sin(T * 0.0005 + b.ph) * 3 * windAmp() : 0;
-      const base = b.c < 0.5 ? th.foliage[1] : th.foliage[0];
-      const c = shade(hexToRgb(base), -0.1 * nf);
-      blob(b.x + sx, b.y, b.w, b.h, rgb(c));
-      const hl = shade(hexToRgb(th.foliage[2]), -0.15 * nf);
-      ctx.globalAlpha = 0.35 * (1 - nf * 0.7);
-      blob(b.x + sx - b.w * 0.15, b.y - b.h * 0.15, b.w * 0.7, b.h * 0.75, rgb(hl));
-      ctx.globalAlpha = 1;
-    }
-  }
-
-  function drawWillow() {
-    const wl = geo.willow; if (!wl) return;
-    const th = activeTheme(), nf = clamp(1 - sunAltitude() * 2.6, 0, 1);
-    const sway = motionOn() ? Math.sin(T * 0.0005 + wl.ph) * 3 * windAmp() : 0;
-    const tx = wl.x, ty = wl.base, hh = wl.h;
-    const crownY = ty - hh;
-    ctx.strokeStyle = rgb(mix([90, 70, 48], [46, 42, 40], nf * 0.5));
-    ctx.lineCap = "round";
-    ctx.lineWidth = Math.max(4, hh * 0.075);
-    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.quadraticCurveTo(tx - hh * 0.06, ty - hh * 0.55, tx + sway * 0.4, crownY + hh * 0.12); ctx.stroke();
-    ctx.lineWidth = Math.max(2.4, hh * 0.04);
-    ctx.beginPath(); ctx.moveTo(tx - 1, ty - hh * 0.42); ctx.quadraticCurveTo(tx + hh * 0.2, ty - hh * 0.62, tx + hh * 0.34, ty - hh * 0.56); ctx.stroke();
-    const c1 = shade(hexToRgb(th.foliage[1]), -0.12 * nf), c2 = shade(hexToRgb(th.foliage[2]), -0.18 * nf);
-    ctx.lineWidth = 1.6;
-    for (let i = 0; i < 24; i++) {
-      const a = -Math.PI * 0.92 + (i / 23) * Math.PI * 0.84;
-      const sx = tx + sway * 0.4 + Math.cos(a) * hh * 0.34, sy = crownY + hh * 0.1 + Math.sin(a) * hh * 0.2;
-      const drop = hh * (0.4 + (i % 5) * 0.09);
-      const dx = sway * (0.6 + (i % 3) * 0.3) + (i % 2 ? 3 : -3);
-      ctx.strokeStyle = rgb(i % 2 ? c1 : c2);
-      ctx.globalAlpha = 0.85;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.quadraticCurveTo(sx + dx, sy + drop * 0.55, sx + dx * 1.6, sy + drop);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-    if (state.willowSit) {
-      const px = tx + hh * 0.3, py = ty - hh * 0.56;
-      const ink = rgb(mix([34, 51, 27], [20, 28, 24], nf * 0.5));
-      ctx.fillStyle = ink; ctx.strokeStyle = ink;
-      ctx.beginPath(); ctx.arc(px, py - hh * 0.085, hh * 0.032, 0, 6.2832); ctx.fill();
-      ctx.lineWidth = Math.max(2, hh * 0.02);
-      ctx.beginPath(); ctx.moveTo(px, py - hh * 0.055); ctx.lineTo(px, py); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - hh * 0.02, py + hh * 0.07); ctx.moveTo(px, py); ctx.lineTo(px + hh * 0.025, py + hh * 0.068); ctx.stroke();
-    }
-  }
-
   function windAmp() { return motionOn() ? clamp(state.weather.wind / 20, 0.2, 1.5) : 0; }
 
-  function drawGrassesFlowers() {
-    const th = activeTheme(), nf = clamp(1 - sunAltitude() * 2.4, 0, 1);
-    ctx.lineCap = "round";
-    for (const gr of geo.grasses) {
-      const sway = (motionOn() ? Math.sin(T * 0.0011 + gr.ph) * gr.len * 0.16 * windAmp() : 0) + gr.lean * gr.len * 0.4;
-      const c = shade(hexToRgb(th.foliage[1]), -0.14 * nf);
-      ctx.strokeStyle = rgb(c);
-      ctx.lineWidth = gr.w;
-      ctx.beginPath();
-      ctx.moveTo(gr.x, gr.base);
-      ctx.quadraticCurveTo(gr.x + sway * 0.5, gr.base - gr.len * 0.6, gr.x + sway, gr.base - gr.len);
-      ctx.stroke();
+  // ---------- the garden, painted by the Claude Design element library ----------
+  // ponytail: flora (pond, trees, flowers, grass) renders to an offscreen layer every
+  // OTHER frame — sway sines are slow, 30fps is invisible. The robin, butterflies and
+  // sit figure are cheap and animate at full rate on top; sky and verse never drop.
+  const gcv = document.createElement("canvas");
+  const gctx = gcv.getContext("2d");
+  let gFrame = 0;
+  function drawGardenScene() {
+    if (!L) return;
+    const P = gePalette(), t = motionOn() ? T * 0.001 : 0, wind = windAmp() || 0.35;
+    gFrame++;
+    if (gcv.width !== cv.width || gcv.height !== cv.height) {
+      gcv.width = cv.width; gcv.height = cv.height;
+      gFrame = 0;
     }
-    for (const f of geo.flowers) {
-      const sway = (motionOn() ? Math.sin(T * 0.0012 + f.ph) * f.h * 0.14 * windAmp() : 0) + f.lean * f.h * 0.4;
-      const tipx = f.x + sway, tipy = f.base - f.h;
-      ctx.strokeStyle = rgb(shade(hexToRgb(th.foliage[0]), -0.1 * nf));
-      ctx.lineWidth = Math.max(1.4, f.br * 0.35);
-      ctx.beginPath();
-      ctx.moveTo(f.x, f.base);
-      ctx.quadraticCurveTo(f.x + sway * 0.5, f.base - f.h * 0.6, tipx, tipy);
-      ctx.stroke();
-      const col = shade(hexToRgb(th.bloom[f.col]), -0.25 * nf);
-      ctx.fillStyle = rgb(col);
-      for (let i = 0; i < f.petals; i++) {
-        const ang = (i / f.petals) * 6.2832;
-        ctx.beginPath();
-        ctx.ellipse(tipx + Math.cos(ang) * f.br, tipy + Math.sin(ang) * f.br, f.br * 0.7, f.br * 0.42, ang, 0, 6.2832);
-        ctx.fill();
-      }
-      ctx.fillStyle = rgb(shade([246, 224, 150], -0.35 * nf));
-      ctx.beginPath(); ctx.arc(tipx, tipy, f.br * 0.55, 0, 6.2832); ctx.fill();
+    if (gFrame % 2 === 0 || gFrame === 1) {
+      gctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      gctx.clearRect(0, 0, W, H);
+      paintFlora(gctx, P, t, wind);
+    }
+    ctx.drawImage(gcv, 0, 0, W, H);
+    drawRobinVignette(P, T * 0.001);
+    drawButterflies(P, t);
+    if (state.willowSit && L.willow) {
+      const w = L.willow;
+      const px = w.x + w.h * 0.2, py = w.y - w.h * 0.5;
+      const ink = "rgba(30,42,26,0.9)";
+      ctx.fillStyle = ink; ctx.strokeStyle = ink; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(px, py - w.h * 0.075, w.h * 0.03, 0, 6.2832); ctx.fill();
+      ctx.lineWidth = Math.max(2, w.h * 0.018);
+      ctx.beginPath(); ctx.moveTo(px, py - w.h * 0.048); ctx.lineTo(px, py); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - w.h * 0.018, py + w.h * 0.06); ctx.moveTo(px, py); ctx.lineTo(px + w.h * 0.022, py + w.h * 0.058); ctx.stroke();
+    }
+  }
+  function paintFlora(g2, P, t, wind) {
+    if (L.pond) {
+      GE.pond.drawBase(g2, L.pond, t, P);
+      for (const k of L.koi) GE.pond.drawKoi(g2, L.pond, k, t, P);
+      for (const p of L.lilyPads) GE.pond.drawLilyPad(g2, L.pond, p, t, P);
+      GE.pond.drawRipples(g2, L.pond, t, P, L.seed);
+    }
+    const items = [];
+    for (const tr of L.trees) items.push({ y: tr.y, d: () => GE.trees[tr.kind].draw(g2, { x: tr.x, baseY: tr.y, h: tr.h, seed: tr.seed, t: t, P: P, wind: wind }) });
+    for (const f of L.flowers) items.push({ y: f.y, d: () => GE.flowers[f.kind].draw(g2, { x: f.x, baseY: f.y, h: f.h, seed: f.seed, t: t, P: P, wind: wind }) });
+    for (const g of L.grass) items.push({ y: g.base, d: () => GE.drawGrass(g2, { x: g.x, base: g.base, len: g.len, w: g.w, ph: g.ph, lean: g.lean, t: t, P: P, wind: wind }) });
+    items.sort((a, b) => a.y - b.y);
+    for (const it of items) it.d();
+  }
+
+  // robin and nest live in the willow: fly in, feed the chicks, keep watch, fly off (40s loop)
+  function drawRobinVignette(P, t) {
+    const w = L.willow; if (!w) return;
+    const s = Math.max(0.7, w.h / 220);
+    const nest = { x: w.x + w.h * 0.24, y: w.y - w.h * 0.52 };
+    GE.drawNest(ctx, nest.x, nest.y, s * 10, 21, P);
+    const tl = t % 40;
+    const feeding = tl >= 15.5 && tl < 24;
+    const doze = (tl < 8 || tl >= 31) ? 1 : 0;
+    const cyc = feeding ? Math.floor((tl - 15.5) / 2.83) : 0;
+    const u = feeding ? ((tl - 15.5) / 2.83) % 1 : 0;
+    const beg = tl >= 13 && tl < 15.5 ? 0.5 : 0;
+    const g0 = feeding ? (cyc % 2 === 0 ? 1 : 0.3) * (u < 0.55 ? 1 : Math.max(0, 1 - (u - 0.55) / 0.3)) : beg;
+    const g1 = feeding ? (cyc % 2 === 1 ? 1 : 0.3) * (u < 0.55 ? 1 : Math.max(0, 1 - (u - 0.55) / 0.3)) : beg;
+    GE.drawChick(ctx, nest.x - s * 4, nest.y - s * 3, s * 0.6, 1, g0, doze, P);
+    GE.drawChick(ctx, nest.x + s * 3.2, nest.y - s * 2.6, s * 0.55, -1, g1, doze, P);
+    let pose = null;
+    const edge = { x: nest.x + s * 12, y: nest.y - s * 7 };
+    if (tl >= 8 && tl < 13) {
+      const k = smooth((tl - 8) / 5);
+      const x0 = -30, y0 = horizonY * 0.4;
+      pose = { x: lerp(x0, edge.x, k), y: lerp(y0, edge.y, k) - Math.sin(k * Math.PI) * w.h * 0.5, dir: 1, fly: true, flap: k > 0.85 ? 0.5 : Math.sin(t * 15) * 0.8, pitch: k > 0.85 ? -0.2 : 0.05 };
+    } else if (tl >= 13 && tl < 15.5) {
+      pose = { x: edge.x, y: edge.y - Math.abs(Math.sin((tl - 13) * 4)) * 2 * Math.max(0, 14 - tl), dir: -1, legs: true };
+    } else if (feeding) {
+      let pitch = 0;
+      if (u < 0.25) pitch = smooth(u / 0.25) * 0.85;
+      else if (u < 0.5) pitch = 0.85;
+      else if (u < 0.7) pitch = (1 - smooth((u - 0.5) / 0.2)) * 0.85;
+      pose = { x: edge.x, y: edge.y + pitch * 3 * s, dir: -1, pitch: pitch, legs: true, gape: pitch > 0.5 ? 0.7 : 0 };
+    } else if (tl >= 24 && tl < 28) {
+      pose = { x: edge.x, y: edge.y, dir: -1, pitch: -0.04, legs: true, headTurn: Math.sin((tl - 24) * 1.9) * 0.9 };
+    } else if (tl >= 28 && tl < 31) {
+      const k = smooth((tl - 28) / 3);
+      pose = { x: lerp(edge.x, W + 40, k), y: lerp(edge.y, horizonY * 0.15, smooth(k)), dir: 1, fly: true, flap: Math.sin(t * 15) * 0.8, pitch: -0.15 };
+    }
+    if (pose) { pose.s = s * 0.62; pose.P = P; GE.drawRobin(ctx, pose); }
+  }
+
+  const bflies = [{ sd: 3, ox: 0.3, oy: 0.55 }, { sd: 8, ox: 0.7, oy: 0.62 }];
+  function drawButterflies(P, t) {
+    if (isNight() || !motionOn()) return;
+    for (const b of bflies) {
+      const x = W * (b.ox + Math.sin(t * 0.13 + b.sd) * 0.16);
+      const y = horizonY + (H - horizonY) * (b.oy + Math.sin(t * 0.23 + b.sd * 2) * 0.12) - Math.sin(t * 0.9 + b.sd) * 8;
+      GE.drawButterfly(ctx, { x: x, y: y, s: U * 0.045, seed: b.sd, t: t, P: P, tilt: Math.sin(t * 0.5 + b.sd) * 0.2 });
     }
   }
 
@@ -691,73 +683,12 @@
       else if (state.boatP <= 0) { state.boatP = 0; boatDir = 1; boatModel = 1 - boatModel; }
     }
     const bx = W * (0.27 + 0.46 * state.boatP);
-    const L = U * 0.16;
-    const bob = motionOn() ? Math.sin(T * 0.0014) * U * 0.006 : 0;
-    const by = horizonY + (H - horizonY) * 0.24 + bob;
-    const heel = (motionOn() ? Math.sin(T * 0.0008) * 0.028 : 0) + windAmp() * 0.045;
-    const nightK = clamp(1 - sunAltitude() * 3, 0, 1);
-    const sailC = mix([247, 243, 232], [214, 218, 228], nightK);
-    const hullC = mix([62, 47, 35], [34, 30, 34], nightK * 0.6);
+    const by = horizonY + (H - horizonY) * 0.24;
+    // paper-cutout sloop from the element library; each turnaround swaps hulls
     ctx.save();
-    ctx.globalAlpha = 0.16;
-    ctx.fillStyle = "#0d1620";
-    ctx.beginPath(); ctx.ellipse(bx, by + L * 0.16, L * 0.62, L * 0.09, 0, 0, 6.2832); ctx.fill();
-    ctx.globalAlpha = 0.35;
-    ctx.strokeStyle = "rgba(255,255,255,0.5)";
-    ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.moveTo(bx - boatDir * L * 0.6, by + L * 0.12); ctx.quadraticCurveTo(bx - boatDir * L * 1.5, by + L * 0.2, bx - boatDir * L * 2.3, by + L * 0.14); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(bx - boatDir * L * 0.55, by + L * 0.2); ctx.quadraticCurveTo(bx - boatDir * L * 1.3, by + L * 0.3, bx - boatDir * L * 1.9, by + L * 0.26); ctx.stroke();
-    ctx.globalAlpha = 1;
     ctx.translate(bx, by);
-    ctx.rotate(heel * boatDir);
     ctx.scale(boatDir, 1);
-    ctx.fillStyle = rgb(hullC);
-    ctx.beginPath();
-    ctx.moveTo(-L * 0.62, 0);
-    ctx.quadraticCurveTo(-L * 0.5, L * 0.22, 0, L * 0.24);
-    ctx.quadraticCurveTo(L * 0.52, L * 0.2, L * 0.66, -L * 0.02);
-    ctx.lineTo(-L * 0.62, 0);
-    ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = "rgba(216,178,106,0.85)";
-    ctx.lineWidth = Math.max(1.2, L * 0.03);
-    ctx.beginPath(); ctx.moveTo(-L * 0.6, L * 0.015); ctx.lineTo(L * 0.62, -L * 0.005); ctx.stroke();
-    ctx.strokeStyle = rgb(mix([61, 75, 54], [30, 36, 40], nightK * 0.5));
-    ctx.lineWidth = Math.max(1.6, L * 0.035);
-    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -L * 1.18); ctx.stroke();
-    ctx.fillStyle = "rgba(" + sailC[0] + "," + sailC[1] + "," + sailC[2] + ",0.96)";
-    if (boatModel === 0) {
-      ctx.beginPath();
-      ctx.moveTo(-L * 0.02, -L * 1.12);
-      ctx.quadraticCurveTo(-L * 0.5, -L * 0.7, -L * 0.56, -L * 0.16);
-      ctx.lineTo(-L * 0.02, -L * 0.16);
-      ctx.closePath(); ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(L * 0.02, -L * 1.04);
-      ctx.quadraticCurveTo(L * 0.42, -L * 0.62, L * 0.58, -L * 0.1);
-      ctx.lineTo(L * 0.05, -L * 0.1);
-      ctx.closePath(); ctx.fill();
-    } else {
-      ctx.beginPath();
-      ctx.moveTo(-L * 0.03, -L * 1.1);
-      ctx.lineTo(-L * 0.62, -L * 0.84);
-      ctx.quadraticCurveTo(-L * 0.68, -L * 0.48, -L * 0.5, -L * 0.14);
-      ctx.lineTo(-L * 0.03, -L * 0.14);
-      ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = "rgba(180,137,77,0.8)";
-      ctx.lineWidth = Math.max(1, L * 0.022);
-      ctx.beginPath(); ctx.moveTo(-L * 0.03, -L * 1.1); ctx.lineTo(-L * 0.62, -L * 0.84); ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(L * 0.02, -L * 0.76);
-      ctx.quadraticCurveTo(L * 0.32, -L * 0.5, L * 0.42, -L * 0.12);
-      ctx.lineTo(L * 0.04, -L * 0.12);
-      ctx.closePath(); ctx.fill();
-    }
-    ctx.fillStyle = "#B4894D";
-    ctx.beginPath();
-    ctx.moveTo(0, -L * 1.18);
-    ctx.lineTo(L * 0.14, -L * 1.13);
-    ctx.lineTo(0, -L * 1.08);
-    ctx.closePath(); ctx.fill();
+    GE.drawSailboat(ctx, { x: 0, y: 0, s: U * 0.3, seed: boatModel ? 4 : 11, t: motionOn() ? T * 0.001 : 0, P: gePalette() });
     ctx.restore();
   }
 
@@ -948,10 +879,7 @@
       drawRidges();
       drawTreeline(false);
       daylightWash();
-      drawPond();
-      drawBushes();
-      drawWillow();
-      drawGrassesFlowers();
+      drawGardenScene();
     }
     drawAmbient();
     drawWeather();
@@ -1694,8 +1622,8 @@
       tapTimer = setTimeout(() => {
         tapTimer = null;
         if (camTarget > 0.5 || cam > 0.5) { camTarget = 0; camVel = 0; return; }
-        const wl = geo && geo.willow;
-        if (!state.sail.on && wl && Math.abs(x - wl.x) < wl.h * 0.55 && y > wl.base - wl.h * 1.2 && y < wl.base + 16) {
+        const wl = L && L.willow;
+        if (!state.sail.on && wl && Math.abs(x - wl.x) < wl.h * 0.55 && y > wl.y - wl.h * 1.2 && y < wl.y + 16) {
           state.willowSit = !state.willowSit;
           toast(state.willowSit ? "She settles into the willow" : "Down from the branches");
           return;
