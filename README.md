@@ -8,7 +8,7 @@ Android APK: download `secret-garden.apk` from the [latest release](https://gith
 
 ## Data sources
 
-All realtime data comes from open sources that need no account or API key. Weather and air quality come from Open-Meteo. The space station position comes from wheretheiss.at. The moon phase is computed on the device and works offline. After the first launch the app works fully offline, with live data returning whenever a connection exists.
+All realtime data comes from open sources that need no account or API key. Weather and air quality come from Open-Meteo. Road-trip routes come from the OSRM demo server, with towns along the way named by BigDataCloud. The moon phase and the compass and star finder are computed on the device and work offline. After the first launch the app works fully offline, with live data returning whenever a connection exists.
 
 ## Architecture
 

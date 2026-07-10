@@ -34,7 +34,7 @@
     hourly: store.hourly || null,
     sun: store.sun || { sunrise: 390, sunset: 1200 },
     aqi: store.aqi != null ? store.aqi : null,
-    iss: null,
+    trip: Object.assign({ from: "Norwich, NY", to: "Kingston, NY", plan: null }, store.trip || {}),
     rv: null,
     curVerse: null,
     versePaused: false,
@@ -53,7 +53,7 @@
   }
 
   function persist() {
-    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, sun: state.sun, aqi: state.aqi });
+    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, sun: state.sun, aqi: state.aqi, trip: state.trip });
   }
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -76,7 +76,10 @@
     return 2 * R * Math.asin(Math.sqrt(a));
   }
 
-  function realNowMin() { const d = new Date(); return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60; }
+  function realNowMin() {
+    if (state.sun.off != null) { let m = (Date.now() / 60000 + state.sun.off / 60) % 1440; if (m < 0) m += 1440; return m; }
+    const d = new Date(); return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+  }
   function nowMin() {
     if (state.settings.skyMode === "cycle" && state.cycleStart) {
       return (state.cycleBase + ((Date.now() - state.cycleStart) / 150000) * 1440) % 1440;
@@ -147,28 +150,44 @@
       g.trees.push({ x: (i / treeN + (r() - 0.5) * 0.05) * W, w: U * (0.05 + r() * 0.05), h: U * (0.1 + r() * 0.08), ph: r() * 6.28 });
     }
 
+    if (th.water) {
+      const py = horizonY + (H - horizonY) * 0.3;
+      g.pond = { cx: W * (0.5 + (r() - 0.5) * 0.2), cy: py, rx: Math.min(W * 0.3, U * 0.36), ry: (H - horizonY) * 0.12 };
+    }
+    function inPond(x, y, pad) {
+      if (!g.pond) return false;
+      const p = g.pond, dx = (x - p.cx) / (p.rx + pad), dy = (y - p.cy) / (p.ry + pad);
+      return dx * dx + dy * dy < 1;
+    }
     const bushN = clamp(Math.round((5 + th.density * 8) * wk), 4, 16);
     for (let i = 0; i < bushN; i++) {
-      g.bushes.push({ x: (r()) * W, y: horizonY + (H - horizonY) * (0.12 + r() * 0.34), w: U * (0.09 + r() * 0.1), h: U * (0.05 + r() * 0.055), ph: r() * 6.28, c: r() });
+      const w = U * (0.09 + r() * 0.1), h = U * (0.05 + r() * 0.055);
+      let x = 0, y = 0, tries = 0;
+      do { x = r() * W; y = horizonY + (H - horizonY) * (0.12 + r() * 0.34); tries++; } while (inPond(x, y - h * 0.5, w) && tries < 9);
+      if (inPond(x, y - h * 0.5, w)) continue;
+      g.bushes.push({ x: x, y: y, w: w, h: h, ph: r() * 6.28, c: r() });
     }
     g.bushes.sort((a, b) => a.y - b.y);
 
     const grassN = Math.round((70 + th.density * 220) * wk);
     for (let i = 0; i < grassN; i++) {
-      g.grasses.push({ x: r() * W * 1.02, base: horizonY + (H - horizonY) * (0.4 + r() * 0.62), len: U * (0.05 + r() * 0.12), w: 1 + r() * 2.2, ph: r() * 6.28, lean: (r() - 0.5) * 0.5 });
+      const gx = r() * W * 1.02, gb = horizonY + (H - horizonY) * (0.4 + r() * 0.62);
+      if (inPond(gx, gb, 0)) continue;
+      g.grasses.push({ x: gx, base: gb, len: U * (0.05 + r() * 0.12), w: 1 + r() * 2.2, ph: r() * 6.28, lean: (r() - 0.5) * 0.5 });
     }
     g.grasses.sort((a, b) => a.base - b.base);
 
-    const flowerN = clamp(Math.round((12 + th.density * 34) * wk), 8, 60);
+    // ponytail: 10x flower density, capped at 480 so petal fills stay under ~3.5k/frame on phones
+    const flowerN = clamp(Math.round((120 + th.density * 340) * wk), 60, 480);
     for (let i = 0; i < flowerN; i++) {
-      g.flowers.push({ x: r() * W, base: horizonY + (H - horizonY) * (0.42 + r() * 0.56), h: U * (0.08 + r() * 0.15), ph: r() * 6.28, br: U * (0.012 + r() * 0.014), col: Math.floor(r() * th.bloom.length), petals: 5 + Math.floor(r() * 3), lean: (r() - 0.5) * 0.4 });
+      const fx = r() * W, fb = horizonY + (H - horizonY) * (0.42 + r() * 0.56);
+      if (inPond(fx, fb, 0)) continue;
+      g.flowers.push({ x: fx, base: fb, h: U * (0.08 + r() * 0.15), ph: r() * 6.28, br: U * (0.012 + r() * 0.014), col: Math.floor(r() * th.bloom.length), petals: 5 + Math.floor(r() * 3), lean: (r() - 0.5) * 0.4 });
     }
     g.flowers.sort((a, b) => a.base - b.base);
 
-    if (th.water) {
-      const py = horizonY + (H - horizonY) * 0.3;
-      g.pond = { cx: W * (0.5 + (r() - 0.5) * 0.2), cy: py, rx: Math.min(W * 0.3, U * 0.36), ry: (H - horizonY) * 0.12 };
-    }
+    const wxSide = g.pond && g.pond.cx < W * 0.5 ? 0.82 : 0.18;
+    g.willow = { x: W * (wxSide + (r() - 0.5) * 0.05), base: horizonY + (H - horizonY) * 0.68, h: U * 0.44, ph: r() * 6.28 };
 
     const starN = clamp(Math.round(90 * wk), 55, 140);
     for (let i = 0; i < starN; i++) g.stars.push({ x: r() * W, y: r() * horizonY * 0.92, r: 0.5 + r() * 1.2, ph: r() * 6.28 });
@@ -311,11 +330,52 @@
     }
     ctx.restore();
   }
+  // ponytail: clouds part for 90s after a double-tap, then drift back
+  let clearK = 0, clearUntil = 0;
+  function cloudFade() {
+    const target = Date.now() < clearUntil ? 1 : 0;
+    clearK += (target - clearK) * 0.035;
+    if (clearK < 0.002) clearK = 0;
+    return 1 - clearK;
+  }
   function drawClouds() {
+    const k = cloudFade();
     for (const c of clouds) {
       if (motionOn()) { c.x += c.sp * (1 + state.weather.wind / 30); if (c.x - 80 * c.s > W) c.x = -90 * c.s; }
-      puff(c.x, c.y + 30, c.s, c.op);
+      if (k > 0.02) puff(c.x, c.y + 30, c.s, c.op * k);
     }
+  }
+  function partClouds() {
+    clearUntil = Date.now() + 90000;
+    const pool = VERSES.filter(v => v.moods.indexOf("storm") >= 0 || v.moods.indexOf("wind") >= 0);
+    if (pool.length) setVerse(pool[Math.floor(Math.random() * pool.length)]);
+    toast("A reminder of His power over the skies");
+  }
+
+  let skyP = 0, skyTarget = 0, dragY = null, dragMoved = false;
+  function drawSkyView() {
+    if (dragY === null) skyP += (skyTarget - skyP) * 0.12;
+    if (skyP < 0.004) { skyP = 0; return; }
+    const s = skyColors();
+    ctx.save();
+    ctx.globalAlpha = skyP;
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, rgb(s.top));
+    g.addColorStop(1, rgb(mix(s.top, s.hor, 0.55)));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    const a = clamp(1 - sunAltitude() * 4.5, 0, 1) * 0.6;
+    if (a > 0.03) {
+      ctx.fillStyle = "#FBFAF2";
+      for (const st of geo.stars) { ctx.globalAlpha = skyP * a; ctx.beginPath(); ctx.arc(st.x, (st.y / (horizonY || 1)) * H, st.r, 0, 6.2832); ctx.fill(); }
+    }
+    const k = cloudFade();
+    for (const c of clouds) puff(c.x, (c.y / (horizonY || 1)) * H * 0.9 + H * 0.05, c.s * 2.4, Math.min(0.8, c.op * 1.7) * skyP * k);
+    ctx.globalAlpha = skyP;
+    ctx.font = "600 12px 'DM Sans', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = sunAltitude() > 0.09 ? "#3D4B36" : "#E9F0E2";
+    ctx.fillText("OVERHEAD · CLOUDS " + state.weather.cloud + "%" + (Date.now() < clearUntil ? " · PARTED" : ""), W / 2, 30);
+    ctx.restore();
   }
 
   function ridgePath(pts, colorTop, colorBot) {
@@ -399,6 +459,44 @@
       ctx.globalAlpha = 0.35 * (1 - nf * 0.7);
       blob(b.x + sx - b.w * 0.15, b.y - b.h * 0.15, b.w * 0.7, b.h * 0.75, rgb(hl));
       ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawWillow() {
+    const wl = geo.willow; if (!wl) return;
+    const th = activeTheme(), nf = clamp(1 - sunAltitude() * 2.6, 0, 1);
+    const sway = motionOn() ? Math.sin(T * 0.0005 + wl.ph) * 3 * windAmp() : 0;
+    const tx = wl.x, ty = wl.base, hh = wl.h;
+    const crownY = ty - hh;
+    ctx.strokeStyle = rgb(mix([90, 70, 48], [46, 42, 40], nf * 0.5));
+    ctx.lineCap = "round";
+    ctx.lineWidth = Math.max(4, hh * 0.075);
+    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.quadraticCurveTo(tx - hh * 0.06, ty - hh * 0.55, tx + sway * 0.4, crownY + hh * 0.12); ctx.stroke();
+    ctx.lineWidth = Math.max(2.4, hh * 0.04);
+    ctx.beginPath(); ctx.moveTo(tx - 1, ty - hh * 0.42); ctx.quadraticCurveTo(tx + hh * 0.2, ty - hh * 0.62, tx + hh * 0.34, ty - hh * 0.56); ctx.stroke();
+    const c1 = shade(hexToRgb(th.foliage[1]), -0.12 * nf), c2 = shade(hexToRgb(th.foliage[2]), -0.18 * nf);
+    ctx.lineWidth = 1.6;
+    for (let i = 0; i < 24; i++) {
+      const a = -Math.PI * 0.92 + (i / 23) * Math.PI * 0.84;
+      const sx = tx + sway * 0.4 + Math.cos(a) * hh * 0.34, sy = crownY + hh * 0.1 + Math.sin(a) * hh * 0.2;
+      const drop = hh * (0.4 + (i % 5) * 0.09);
+      const dx = sway * (0.6 + (i % 3) * 0.3) + (i % 2 ? 3 : -3);
+      ctx.strokeStyle = rgb(i % 2 ? c1 : c2);
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.quadraticCurveTo(sx + dx, sy + drop * 0.55, sx + dx * 1.6, sy + drop);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    if (state.willowSit) {
+      const px = tx + hh * 0.3, py = ty - hh * 0.56;
+      const ink = rgb(mix([34, 51, 27], [20, 28, 24], nf * 0.5));
+      ctx.fillStyle = ink; ctx.strokeStyle = ink;
+      ctx.beginPath(); ctx.arc(px, py - hh * 0.085, hh * 0.032, 0, 6.2832); ctx.fill();
+      ctx.lineWidth = Math.max(2, hh * 0.02);
+      ctx.beginPath(); ctx.moveTo(px, py - hh * 0.055); ctx.lineTo(px, py); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - hh * 0.02, py + hh * 0.07); ctx.moveTo(px, py); ctx.lineTo(px + hh * 0.025, py + hh * 0.068); ctx.stroke();
     }
   }
 
@@ -501,9 +599,14 @@
     }
   }
 
+  let boatDir = 1, boatModel = 0;
   function drawBoat() {
-    if (motionOn() && !document.hidden) state.boatP = (state.boatP + (T - lastTs) * (0.9 + windAmp() * 0.5) / 90000) % 1;
-    const bx = W * (-0.14 + 1.28 * state.boatP);
+    if (motionOn() && !document.hidden) {
+      state.boatP += boatDir * (T - lastTs) * (0.9 + windAmp() * 0.5) / 90000;
+      if (state.boatP >= 1) { state.boatP = 1; boatDir = -1; boatModel = 1 - boatModel; }
+      else if (state.boatP <= 0) { state.boatP = 0; boatDir = 1; boatModel = 1 - boatModel; }
+    }
+    const bx = W * (0.27 + 0.46 * state.boatP);
     const L = U * 0.16;
     const bob = motionOn() ? Math.sin(T * 0.0014) * U * 0.006 : 0;
     const by = horizonY + (H - horizonY) * 0.24 + bob;
@@ -518,11 +621,12 @@
     ctx.globalAlpha = 0.35;
     ctx.strokeStyle = "rgba(255,255,255,0.5)";
     ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.moveTo(bx - L * 0.6, by + L * 0.12); ctx.quadraticCurveTo(bx - L * 1.5, by + L * 0.2, bx - L * 2.3, by + L * 0.14); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(bx - L * 0.55, by + L * 0.2); ctx.quadraticCurveTo(bx - L * 1.3, by + L * 0.3, bx - L * 1.9, by + L * 0.26); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx - boatDir * L * 0.6, by + L * 0.12); ctx.quadraticCurveTo(bx - boatDir * L * 1.5, by + L * 0.2, bx - boatDir * L * 2.3, by + L * 0.14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx - boatDir * L * 0.55, by + L * 0.2); ctx.quadraticCurveTo(bx - boatDir * L * 1.3, by + L * 0.3, bx - boatDir * L * 1.9, by + L * 0.26); ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.translate(bx, by);
-    ctx.rotate(heel);
+    ctx.rotate(heel * boatDir);
+    ctx.scale(boatDir, 1);
     ctx.fillStyle = rgb(hullC);
     ctx.beginPath();
     ctx.moveTo(-L * 0.62, 0);
@@ -537,16 +641,33 @@
     ctx.lineWidth = Math.max(1.6, L * 0.035);
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -L * 1.18); ctx.stroke();
     ctx.fillStyle = "rgba(" + sailC[0] + "," + sailC[1] + "," + sailC[2] + ",0.96)";
-    ctx.beginPath();
-    ctx.moveTo(-L * 0.02, -L * 1.12);
-    ctx.quadraticCurveTo(-L * 0.5, -L * 0.7, -L * 0.56, -L * 0.16);
-    ctx.lineTo(-L * 0.02, -L * 0.16);
-    ctx.closePath(); ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(L * 0.02, -L * 1.04);
-    ctx.quadraticCurveTo(L * 0.42, -L * 0.62, L * 0.58, -L * 0.1);
-    ctx.lineTo(L * 0.05, -L * 0.1);
-    ctx.closePath(); ctx.fill();
+    if (boatModel === 0) {
+      ctx.beginPath();
+      ctx.moveTo(-L * 0.02, -L * 1.12);
+      ctx.quadraticCurveTo(-L * 0.5, -L * 0.7, -L * 0.56, -L * 0.16);
+      ctx.lineTo(-L * 0.02, -L * 0.16);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(L * 0.02, -L * 1.04);
+      ctx.quadraticCurveTo(L * 0.42, -L * 0.62, L * 0.58, -L * 0.1);
+      ctx.lineTo(L * 0.05, -L * 0.1);
+      ctx.closePath(); ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(-L * 0.03, -L * 1.1);
+      ctx.lineTo(-L * 0.62, -L * 0.84);
+      ctx.quadraticCurveTo(-L * 0.68, -L * 0.48, -L * 0.5, -L * 0.14);
+      ctx.lineTo(-L * 0.03, -L * 0.14);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "rgba(180,137,77,0.8)";
+      ctx.lineWidth = Math.max(1, L * 0.022);
+      ctx.beginPath(); ctx.moveTo(-L * 0.03, -L * 1.1); ctx.lineTo(-L * 0.62, -L * 0.84); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(L * 0.02, -L * 0.76);
+      ctx.quadraticCurveTo(L * 0.32, -L * 0.5, L * 0.42, -L * 0.12);
+      ctx.lineTo(L * 0.04, -L * 0.12);
+      ctx.closePath(); ctx.fill();
+    }
     ctx.fillStyle = "#B4894D";
     ctx.beginPath();
     ctx.moveTo(0, -L * 1.18);
@@ -694,8 +815,8 @@
     const alt = sunAltitude();
     const nightMode = alt <= 0.09;
     const s = sky.fs / 22;
-    puff(cxp - sky.tw * 0.28, yTop + sky.lh * (sky.lines.length - 1) * 0.5, s * 1.7, 0.13 * a);
-    puff(cxp + sky.tw * 0.3, yTop + sky.lh * 0.3, s * 1.4, 0.11 * a);
+    const vc = sky.cloud || { s: 2, dx: 0, dy: 0.4 };
+    puff(cxp + sky.tw * vc.dx, yTop + sky.lh * (sky.lines.length - 1) * vc.dy, s * vc.s, 0.16 * a);
     ctx.save();
     ctx.globalAlpha = a;
     ctx.textAlign = "center";
@@ -736,12 +857,14 @@
       daylightWash();
       drawPond();
       drawBushes();
+      drawWillow();
       drawGrassesFlowers();
     }
     drawSkyVerse();
     drawAmbient();
     drawWeather();
     drawFog();
+    drawSkyView();
     requestAnimationFrame(frame);
   }
 
@@ -785,6 +908,8 @@
   }
   function setVerse(v) {
     state.curVerse = v;
+    let hsh = 0; for (let i = 0; i < v.ref.length; i++) hsh = (hsh * 31 + v.ref.charCodeAt(i)) >>> 0;
+    sky.cloud = { s: 1.6 + (hsh % 5) * 0.25, dx: -0.26 + ((hsh >> 3) % 7) * 0.085, dy: 0.15 + ((hsh >> 6) % 5) * 0.14 };
     el("verse-live").textContent = v.text + " " + v.ref;
     layoutVerse();
     sky.prog = 0;
@@ -806,11 +931,13 @@
     const w = wxLabel(state.weather.code);
     el("cond-wx-glyph").textContent = w[1];
     el("cond-wx-text").innerHTML = (state.weather.temp != null ? "<b>" + state.weather.temp + "°</b> " : "") + w[0];
-    el("temp-link").href = "https://www.google.com/search?q=" + encodeURIComponent("weather " + state.loc.place);
-    const issEl = el("cond-iss");
-    if (state.iss) { issEl.style.display = ""; el("cond-iss-text").innerHTML = "ISS <b>" + state.iss.dist.toLocaleString() + " km</b>"; }
-    else issEl.style.display = "none";
+    const gq = (q) => "https://www.google.com/search?q=" + encodeURIComponent(q + " " + state.loc.place);
+    el("temp-link").href = gq("weather");
+    el("hb-rain-link").href = gq("hourly rain forecast");
+    el("hb-wind-link").href = gq("wind forecast");
+    el("hb-cloud-link").href = gq("cloud cover forecast");
     const aqiEl = el("cond-aqi");
+    aqiEl.href = gq("air quality");
     if (state.aqi != null) { aqiEl.style.display = ""; el("cond-aqi-text").innerHTML = "Air <b>" + state.aqi + "</b>"; }
     else aqiEl.style.display = "none";
     updateHoursBar();
@@ -830,7 +957,7 @@
       const r = await fetch(url); if (!r.ok) throw 0;
       const j = await r.json(), c = j.current;
       state.weather = { code: c.weather_code, temp: Math.round(c.temperature_2m), cloud: c.cloud_cover, wind: c.wind_speed_10m, windDir: c.wind_direction_10m, isDay: c.is_day, precip: c.precipitation };
-      if (j.daily && j.daily.sunrise) state.sun = { sunrise: minutesOf(j.daily.sunrise[0]), sunset: minutesOf(j.daily.sunset[0]) };
+      if (j.daily && j.daily.sunrise) state.sun = { sunrise: minutesOf(j.daily.sunrise[0]), sunset: minutesOf(j.daily.sunset[0]), off: j.utc_offset_seconds != null ? j.utc_offset_seconds : null };
       if (j.hourly && j.hourly.time) {
         const hh = j.hourly;
         let i0 = hh.time.indexOf(c.time.slice(0, 13) + ":00");
@@ -849,15 +976,6 @@
       const j = await r.json();
       state.aqi = j.current && j.current.us_aqi != null ? Math.round(j.current.us_aqi) : null;
       persist(); updateConditions();
-    } catch (e) {}
-  }
-  async function fetchIss() {
-    try {
-      const r = await fetch("https://api.wheretheiss.at/v1/satellites/25544"); if (!r.ok) return;
-      const j = await r.json();
-      const d = haversine(state.loc.lat, state.loc.lon, j.latitude, j.longitude);
-      state.iss = { lat: j.latitude, lon: j.longitude, dist: Math.round(d), near: d < 1600 };
-      updateConditions();
     } catch (e) {}
   }
   async function fetchRadar() {
@@ -890,7 +1008,7 @@
       return { lat: +g.latitude.toFixed(4), lon: +g.longitude.toFixed(4), place: g.name + (g.admin1 ? ", " + g.admin1 : "") };
     } catch (e) { return null; }
   }
-  function refreshData() { fetchWeather(); fetchAqi(); fetchIss(); fetchRadar(); }
+  function refreshData() { fetchWeather(); fetchAqi(); fetchRadar(); }
 
   function tileXY(lat, lon, z) {
     const n = Math.pow(2, z);
@@ -1059,6 +1177,108 @@
     el("cv-text").value = ""; el("cv-ref").value = "";
     setVerse(v);
     toast("Added to the sky");
+  }
+
+  let compassSeen = false, starMode = false, lastHeading = 0;
+  function compassNote() {
+    if (starMode) {
+      const alt = Math.round(Math.abs(state.loc.lat));
+      return "Face north, then look up about " + alt + "° — roughly halfway between the horizon and straight overhead. That still, steady point is the North Star. The Big Dipper's two outer bowl stars point straight at it.";
+    }
+    return compassSeen ? "You are facing " + compassPt(lastHeading) + " (" + Math.round(lastHeading) + "°). The gold star marks north — Polaris lives there." : "Hold the phone flat and turn — the rose follows the real sky.";
+  }
+  function onHeading(e) {
+    if (!el("sheet-compass").classList.contains("open")) return;
+    let h = null;
+    if (e.webkitCompassHeading != null) h = e.webkitCompassHeading;
+    else if (e.alpha != null && (e.absolute || e.type === "deviceorientationabsolute")) h = 360 - e.alpha;
+    if (h == null) return;
+    compassSeen = true;
+    lastHeading = ((h % 360) + 360) % 360;
+    el("compass-rose").style.transform = "rotate(" + (-lastHeading) + "deg)";
+    el("compass-note").textContent = compassNote();
+  }
+  function openCompass() {
+    openSheet("compass");
+    if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) DeviceOrientationEvent.requestPermission().catch(() => {});
+    el("compass-note").textContent = compassNote();
+    setTimeout(() => {
+      if (!compassSeen && el("sheet-compass").classList.contains("open") && !starMode) {
+        el("compass-note").textContent = "No compass sensor here. Near sunset the sun sits west; face away from it at dawn and you look west too.";
+      }
+    }, 1500);
+  }
+
+  async function planTrip() {
+    const fromQ = (el("trip-from").value || "").trim() || state.trip.from;
+    const toQ = (el("trip-to").value || "").trim() || state.trip.to;
+    el("trip-list").innerHTML = "<p class='empty-note'>Charting the road...</p>";
+    try {
+      const A = await geocode(fromQ), B = await geocode(toQ);
+      if (!A || !B) { el("trip-list").innerHTML = "<p class='empty-note'>Couldn't find those places. Try town, state.</p>"; return; }
+      const r = await fetch("https://router.project-osrm.org/route/v1/driving/" + A.lon + "," + A.lat + ";" + B.lon + "," + B.lat + "?overview=full&geometries=geojson&annotations=duration");
+      if (!r.ok) throw 0;
+      const j = await r.json();
+      const route = j.routes && j.routes[0]; if (!route) throw 0;
+      const coords = route.geometry.coordinates;
+      const durs = route.legs[0].annotation.duration;
+      const total = route.duration;
+      // ponytail: one sample per 30 driving minutes, stretched on very long trips to cap API load at ~15 points
+      const stepS = Math.max(1800, total / 14);
+      const samples = [{ lat: A.lat, lon: A.lon, sec: 0, name: A.place.split(",")[0] }];
+      let acc = 0, next = stepS;
+      for (let i = 0; i < durs.length; i++) {
+        acc += durs[i];
+        if (acc >= next && i + 1 < coords.length) { const c = coords[i + 1]; samples.push({ lat: c[1], lon: c[0], sec: acc, name: null }); next += stepS; }
+      }
+      samples.push({ lat: B.lat, lon: B.lon, sec: total, name: B.place.split(",")[0] });
+      await Promise.all(samples.map(async s => {
+        if (s.name) return;
+        try {
+          const rr = await fetch("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=" + s.lat + "&longitude=" + s.lon + "&localityLanguage=en");
+          const g = await rr.json();
+          s.name = String(g.locality || g.city || "On the road").replace(/^(Town|Village|City) of /, "").replace(/[<>&]/g, "");
+        } catch (e) { s.name = "On the road"; }
+      }));
+      const lats = samples.map(s => s.lat.toFixed(3)).join(","), lons = samples.map(s => s.lon.toFixed(3)).join(",");
+      const wr = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lats + "&longitude=" + lons + "&current=weather_code&hourly=precipitation_probability,weather_code&forecast_days=2&timezone=auto");
+      const wj = await wr.json();
+      const arr = Array.isArray(wj) ? wj : [wj];
+      const rows = [];
+      let prevName = "";
+      samples.forEach((s, i) => {
+        if (s.name === prevName && i !== samples.length - 1) return;
+        prevName = s.name;
+        let pp = null, code = null;
+        const w = arr[i];
+        if (w && w.hourly && w.hourly.time) {
+          const cur = w.current && w.current.time ? w.hourly.time.indexOf(w.current.time.slice(0, 13) + ":00") : 0;
+          const idx = clamp((cur < 0 ? 0 : cur) + Math.round(s.sec / 3600), 0, w.hourly.time.length - 1);
+          pp = w.hourly.precipitation_probability[idx];
+          code = w.hourly.weather_code[idx];
+        }
+        rows.push({ name: s.name, min: Math.round(s.sec / 60), pp: pp, code: code });
+      });
+      state.trip = { from: A.place, to: B.place, plan: { at: Date.now(), totalMin: Math.round(total / 60), rows: rows } };
+      persist(); renderTrip();
+    } catch (e) {
+      el("trip-list").innerHTML = "<p class='empty-note'>The road service is out of reach right now. Try again in a moment.</p>";
+    }
+  }
+  function renderTrip() {
+    el("trip-from").value = state.trip.from;
+    el("trip-to").value = state.trip.to;
+    const wrap = el("trip-list"), plan = state.trip.plan;
+    if (!plan) { wrap.innerHTML = "<p class='empty-note'>Plan the drive and every half hour of road gets its town and its sky.</p>"; el("trip-total").textContent = ""; return; }
+    wrap.innerHTML = "";
+    plan.rows.forEach(rw => {
+      const d = document.createElement("div");
+      d.className = "trip-row";
+      const rainy = rw.pp != null && (rw.pp >= 40 || (rw.code >= 51 && rw.code < 80));
+      d.innerHTML = "<span class='hlab'>" + (rw.min === 0 ? "go" : fmtDur(rw.min / 60)) + "</span><b>" + rw.name + "</b><span class='hval'>" + (rw.code != null ? wxLabel(rw.code)[1] + " " : "") + (rw.pp != null ? rw.pp + "%" + (rainy ? " rain" : "") : "") + "</span>";
+      wrap.appendChild(d);
+    });
+    el("trip-total").textContent = "About " + fmtDur(plan.totalMin / 60) + " of driving. Skies shown for each town at the half-hour you pass it.";
   }
 
   function nm(km) { return km * 0.539957; }
@@ -1302,14 +1522,60 @@
     el("open-verses").onclick = () => { renderCvList(); openSheet("verses"); };
     el("cv-save").onclick = saveCustomVerse;
     el("sail-toggle").onclick = () => setSailing(!state.sail.on);
-    el("open-route").onclick = () => { renderRoute(); openSheet("route"); };
+    el("open-route").onclick = () => { renderRoute(); renderTrip(); openSheet("route"); };
     el("stop-add").onclick = addStop;
     el("stop-input").addEventListener("keydown", e => { if (e.key === "Enter") addStop(); });
-    document.querySelectorAll("#speed-seg button").forEach(b => b.onclick = () => { state.sail.speed = +b.dataset.v; persist(); renderRoute(); });
-    document.querySelector(".stage").addEventListener("click", e => {
-      if (e.target !== e.currentTarget) return;
-      if (e.clientY < horizonY) setVerse(pickVerse());
+    el("open-compass").onclick = openCompass;
+    window.addEventListener("deviceorientationabsolute", onHeading);
+    window.addEventListener("deviceorientation", onHeading);
+    document.querySelectorAll("#compass-mode button").forEach(b => b.onclick = () => {
+      starMode = b.dataset.v === "star";
+      document.querySelectorAll("#compass-mode button").forEach(x => x.classList.toggle("on", x === b));
+      el("compass-note").textContent = compassNote();
     });
+    el("trip-go").onclick = planTrip;
+    el("trip-from").addEventListener("keydown", e => { if (e.key === "Enter") planTrip(); });
+    el("trip-to").addEventListener("keydown", e => { if (e.key === "Enter") planTrip(); });
+    document.querySelectorAll("#speed-seg button").forEach(b => b.onclick = () => { state.sail.speed = +b.dataset.v; persist(); renderRoute(); });
+    const stage = document.querySelector(".stage");
+    let tapTimer = null, lastTap = 0;
+    stage.addEventListener("pointerdown", e => {
+      if (e.target !== stage) return;
+      dragY = e.clientY; dragMoved = false;
+    });
+    stage.addEventListener("pointermove", e => {
+      if (dragY === null) return;
+      const dy = e.clientY - dragY;
+      if (Math.abs(dy) > 14) dragMoved = true;
+      if (dragMoved) skyP = clamp(skyTarget + dy / (H * 0.55), 0, 1);
+    });
+    stage.addEventListener("pointerup", e => {
+      if (dragY === null) return;
+      const wasDrag = dragMoved;
+      dragY = null; dragMoved = false;
+      if (wasDrag) { skyTarget = skyP > 0.4 ? 1 : 0; return; }
+      const now = Date.now();
+      if (now - lastTap < 320) {
+        lastTap = 0;
+        if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
+        partClouds();
+        return;
+      }
+      lastTap = now;
+      const x = e.clientX, y = e.clientY;
+      tapTimer = setTimeout(() => {
+        tapTimer = null;
+        if (skyTarget > 0.5 || skyP > 0.5) { skyTarget = 0; return; }
+        const wl = geo && geo.willow;
+        if (!state.sail.on && wl && Math.abs(x - wl.x) < wl.h * 0.55 && y > wl.base - wl.h * 1.2 && y < wl.base + 16) {
+          state.willowSit = !state.willowSit;
+          toast(state.willowSit ? "She settles into the willow" : "Down from the branches");
+          return;
+        }
+        if (y < horizonY) setVerse(pickVerse());
+      }, 300);
+    });
+    stage.addEventListener("pointercancel", () => { dragY = null; dragMoved = false; });
   }
 
   function registerSW() {
@@ -1328,10 +1594,9 @@
     updateConditions();
     renderHours();
     refreshData();
-    setInterval(fetchWeather, 600000);
-    setInterval(fetchAqi, 900000);
-    setInterval(fetchIss, 12000);
-    setInterval(fetchRadar, 600000);
+    // ponytail: one 5-min pulse, silent while hidden — the app never works in the background
+    setInterval(() => { if (!document.hidden) refreshData(); }, 300000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshData(); });
     registerSW();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutVerse);
     requestAnimationFrame(frame);

@@ -31,8 +31,7 @@
     <div class="conditions">
       <span class="chip-info live"><span id="cond-place">Beaver, PA</span></span>
       <a class="chip-info tap" id="temp-link" target="_blank" rel="noopener" href="https://www.google.com/search?q=weather+Beaver+PA" aria-label="Check this temperature on Google"><span class="glyph" id="cond-wx-glyph">&#9728;&#65039;</span><span id="cond-wx-text">Clear</span></a>
-      <span class="chip-info" id="cond-aqi" style="display:none"><span id="cond-aqi-text">Air</span></span>
-      <span class="chip-info" id="cond-iss" style="display:none"><span class="glyph">&#128760;</span><span id="cond-iss-text">ISS</span></span>
+      <a class="chip-info tap" id="cond-aqi" target="_blank" rel="noopener" style="display:none" aria-label="Check this air quality on Google"><span id="cond-aqi-text">Air</span></a>
     </div>
   </header>
 
@@ -44,9 +43,9 @@
   </main>
 
   <div class="hours-bar" role="group" aria-label="Next hours">
-    <span class="hb-chip"><span class="glyph">&#128167;</span><b id="hb-rain">--%</b></span>
-    <span class="hb-chip"><span class="glyph">&#127788;&#65039;</span><b id="hb-wind">--</b></span>
-    <span class="hb-chip"><span class="glyph">&#9729;&#65039;</span><b id="hb-cloud">--%</b></span>
+    <a class="hb-chip" id="hb-rain-link" target="_blank" rel="noopener" aria-label="Check rain forecast on Google"><span class="glyph">&#128167;</span><b id="hb-rain">--%</b></a>
+    <a class="hb-chip" id="hb-wind-link" target="_blank" rel="noopener" aria-label="Check wind forecast on Google"><span class="glyph">&#127788;&#65039;</span><b id="hb-wind">--</b></a>
+    <a class="hb-chip" id="hb-cloud-link" target="_blank" rel="noopener" aria-label="Check cloud cover on Google"><span class="glyph">&#9729;&#65039;</span><b id="hb-cloud">--%</b></a>
     <button class="chip hb-open" id="open-hours">Hourly sky</button>
   </div>
 
@@ -55,7 +54,8 @@
     <div class="dock-tools">
       <button class="icon-btn" id="open-verses" aria-label="Her verses">&#10077;</button>
       <button class="icon-btn" id="sail-toggle" aria-pressed="false" aria-label="Sailing mode">&#9973;</button>
-      <button class="icon-btn" id="open-route" aria-label="Route planner" style="display:none">&#9875;</button>
+      <button class="icon-btn" id="open-route" aria-label="Routes and road trips" style="display:none">&#9875;</button>
+      <button class="icon-btn" id="open-compass" aria-label="Compass and star finder">&#129517;</button>
       <button class="icon-btn" id="open-about" aria-label="Settings and about">&#9881;</button>
     </div>
   </nav>
@@ -185,6 +185,39 @@
     <div id="stop-list"></div>
     <p class="about" id="route-total"></p>
   </div>
+  <div class="field">
+    <label>Road trip</label>
+    <div class="triprow">
+      <input type="text" id="trip-from" class="text-input" placeholder="From" maxlength="60">
+      <input type="text" id="trip-to" class="text-input" placeholder="To" maxlength="60">
+      <button class="btn primary" id="trip-go">Plan</button>
+    </div>
+    <div id="trip-list"></div>
+    <p class="about" id="trip-total"></p>
+  </div>
+</section>
+
+<section class="sheet" id="sheet-compass" role="dialog" aria-label="Compass and star finder">
+  <div class="sheet-head">
+    <h2>Compass &amp; <span class="em">stars</span></h2>
+    <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <div class="compass-wrap">
+    <div class="compass-outer">
+      <div class="compass-rose" id="compass-rose">
+        <span class="cpt cn">N</span><span class="cpt ce">E</span><span class="cpt cs">S</span><span class="cpt cw">W</span>
+        <span class="cstar" aria-hidden="true">&#9733;</span>
+      </div>
+      <div class="compass-needle" aria-hidden="true"></div>
+    </div>
+    <p class="about" id="compass-note"></p>
+  </div>
+  <div class="field">
+    <div class="seg" id="compass-mode">
+      <button data-v="compass" class="on">Compass</button>
+      <button data-v="star">Star finder</button>
+    </div>
+  </div>
 </section>
 
 <section class="sheet" id="sheet-about" role="dialog" aria-label="Settings and about">
@@ -218,7 +251,7 @@
   <div class="field about">
     <label>About</label>
     <p>The scene follows the real sky at your location. Tonight the moon is <b id="about-moon">waxing</b>. Day cycle plays the whole day, sunrise to stars, in a few minutes.</p>
-    <p>Live data comes from open sources that need no account: <a class="src" href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> for weather and air, <a class="src" href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a> for rain radar, NASA GIBS for satellite views, and a public feed for the <span class="src">space station</span>. The moon phase is computed on the device and works offline.</p>
+    <p>Live data comes from open sources that need no account: <a class="src" href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> for weather and air, <a class="src" href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a> for rain radar, NASA GIBS for satellite views, <a class="src" href="https://project-osrm.org/" target="_blank" rel="noopener">OSRM</a> for road routes, and <a class="src" href="https://www.bigdatacloud.com/" target="_blank" rel="noopener">BigDataCloud</a> for the towns along the way. The moon phase and compass work on the device, offline.</p>
     <p>Scripture is the public-domain <b>Berean Standard Bible</b>, chosen to echo the mood of the garden and the river.</p>
   </div>
 </section>

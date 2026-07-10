@@ -575,3 +575,57 @@ p.about.credit a { color: var(--honey-deep); text-decoration: none; }
 .stop-expand .rowline span { font-size: 0.78rem; color: var(--ink-muted); }
 .stop-expand .mini { padding: 6px 11px; border-radius: 100px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.45); color: var(--ink-soft); font-size: 0.74rem; font-weight: 600; cursor: pointer; flex: 0 0 auto; }
 .stop-expand .mini:hover { border-color: var(--line-warm); color: var(--ink); }
+
+a.hb-chip { text-decoration: none; cursor: pointer; }
+a.hb-chip:hover { border-color: var(--line-warm); background: rgba(255, 255, 255, 0.72); }
+
+.triprow { display: flex; gap: 8px; }
+.triprow .btn { flex: 0 0 auto; max-width: 90px; }
+.trip-row {
+  display: grid;
+  grid-template-columns: 58px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.86rem;
+}
+.trip-row:last-child { border-bottom: none; }
+.trip-row .hlab { font-weight: 600; color: var(--ink-muted); font-size: 0.76rem; letter-spacing: 0.04em; }
+.trip-row b { color: var(--ink); font-weight: 600; }
+.trip-row .hval { font-weight: 600; color: var(--ink); white-space: nowrap; }
+
+.compass-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 6px 0 2px; }
+.compass-outer { position: relative; width: 190px; height: 190px; }
+.compass-rose {
+  position: absolute; inset: 0;
+  border: 2px solid var(--line-warm);
+  border-radius: 50%;
+  background: radial-gradient(circle at 42% 36%, rgba(255, 255, 255, 0.85), rgba(233, 240, 226, 0.6));
+  transition: transform 0.25s var(--ease);
+}
+.compass-rose .cpt {
+  position: absolute; left: 50%; top: 50%;
+  font-weight: 700; font-size: 0.9rem; color: var(--ink-soft);
+  transform: translate(-50%, -50%);
+}
+.compass-rose .cn { top: 14%; color: var(--honey-deep); }
+.compass-rose .ce { left: 86%; }
+.compass-rose .cs { top: 86%; }
+.compass-rose .cw { left: 14%; }
+.compass-rose .cstar {
+  position: absolute; left: 50%; top: 4%;
+  transform: translate(-50%, 0);
+  color: var(--honey);
+  font-size: 0.85rem;
+  text-shadow: 0 0 8px rgba(216, 178, 106, 0.8);
+}
+.compass-needle {
+  position: absolute; left: 50%; top: 6px;
+  width: 0; height: 0;
+  transform: translateX(-50%);
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 14px solid var(--rose, #C98B93);
+  filter: drop-shadow(0 1px 2px rgba(40, 60, 30, 0.3));
+}
