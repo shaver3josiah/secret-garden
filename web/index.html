@@ -210,6 +210,13 @@
     <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
   </div>
   <div id="scenes-list"></div>
+  <div class="field">
+    <label>Beyond the garden</label>
+    <div class="seg" id="backdrop-seg">
+      <button data-v="hills">Rolling hills</button>
+      <button data-v="mountains">Catskill mountains</button>
+    </div>
+  </div>
 </section>
 
 <section class="sheet" id="sheet-compass" role="dialog" aria-label="Compass and star finder">
@@ -266,6 +273,7 @@
     <div class="seg">
       <button id="motion-toggle">Animate scene</button>
       <button id="rotate-toggle">Drift verses</button>
+      <button id="open-tour">Show the tour</button>
     </div>
   </div>
   <div class="field about">
@@ -273,6 +281,19 @@
     <p>The scene follows the real sky at your location. Tonight the moon is <b id="about-moon">waxing</b>. Day cycle plays the whole day, sunrise to stars, in a few minutes.</p>
     <p>Live data comes from open sources that need no account: <a class="src" href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> for weather and air, <a class="src" href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a> for rain radar, <a class="src" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> for maps, <a class="src" href="https://project-osrm.org/" target="_blank" rel="noopener">OSRM</a> for road routes, and <a class="src" href="https://www.bigdatacloud.com/" target="_blank" rel="noopener">BigDataCloud</a> for the towns along the way. The moon phase and compass work on the device, offline.</p>
     <p>Scripture is the public-domain <b>Berean Standard Bible</b>, chosen to echo the mood of the garden and the river.</p>
+  </div>
+</section>
+
+<section class="sheet" id="sheet-tour" role="dialog" aria-label="How the garden works">
+  <div class="sheet-head">
+    <h2>A little <span class="em">tour</span></h2>
+    <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <p class="tour-step" id="tour-step"></p>
+  <div class="tour-dots" id="tour-dots"></div>
+  <div class="row-actions">
+    <button class="btn" id="tour-back">Back</button>
+    <button class="btn primary" id="tour-next">Next</button>
   </div>
 </section>
 

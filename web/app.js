@@ -30,7 +30,7 @@
     custom: store.custom || [],
     customVerses: store.customVerses || [],
     sail: Object.assign({ on: false, stops: [], speed: 5 }, store.sail || {}),
-    settings: Object.assign({ autoRotate: true, motion: true, skyMode: "real" }, store.settings || {}),
+    settings: Object.assign({ autoRotate: true, motion: true, skyMode: "real", backdrop: "hills", tourSeen: false }, store.settings || {}),
     weather: store.weather || { code: 0, temp: null, cloud: 22, wind: 6, windDir: 240, isDay: 1, precip: 0 },
     hourly: store.hourly || null,
     sun: store.sun || { sunrise: 390, sunset: 1200 },
@@ -601,7 +601,7 @@
     }
   }
   function drawRidges() {
-    if (activeTheme().mountains) { drawCatskills(); return; }
+    if (activeTheme().mountains || state.settings.backdrop === "mountains") { drawCatskills(); return; }
     const th = activeTheme(), alt = sunAltitude();
     const hazeK = smooth(alt / 0.3);
     const far = shade(mix(hexToRgb(th.foliage[1]), hexToRgb("#cdd8d0"), 0.55), 0);
@@ -641,16 +641,17 @@
     if (!L) return;
     const P = gePalette(), t = motionOn() ? T * 0.001 : 0, wind = windAmp() || 0.35;
     gFrame++;
-    if (gcv.width !== cv.width || gcv.height !== cv.height) {
-      gcv.width = cv.width; gcv.height = cv.height;
+    const bw = Math.round(W * 1.8 * DPR), bh = cv.height;
+    if (gcv.width !== bw || gcv.height !== bh) {
+      gcv.width = bw; gcv.height = bh;
       gFrame = 0;
     }
     if (gFrame % 2 === 0 || gFrame === 1) {
-      gctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-      gctx.clearRect(0, 0, W, H);
+      gctx.setTransform(DPR, 0, 0, DPR, W * 0.4 * DPR, 0);
+      gctx.clearRect(-W * 0.4, 0, W * 1.8, H);
       paintFlora(gctx, P, t, wind);
     }
-    ctx.drawImage(gcv, 0, 0, W, H);
+    ctx.drawImage(gcv, -W * 0.4, 0, W * 1.8, H);
     drawRobinVignette(P, T * 0.001);
     drawButterflies(P, t);
   }
@@ -983,8 +984,8 @@
     ctx.translate(-panX, oy);
     drawSky();
     drawStars();
-    drawCelestial();
     drawClouds();
+    drawCelestial();
     if (state.sail.on) {
       drawRidges();
       drawWater();
@@ -1290,6 +1291,32 @@
     persist(); buildThemeChips(); buildScene();
     closeSheet(); toast("Saved " + name);
   }
+
+  const TOUR = [
+    "Welcome to her Secret Garden. Everything here is alive: the sky, the light, and the weather all follow the real sky over the town named at the top.",
+    "Scripture drifts by on the clouds. Tap anywhere in the sky for a new verse, or tap the quote-mark button to write words of your own into the rotation.",
+    "Pull down on the garden, gently, like drawing back a curtain. You will look straight up into today's clouds — as many as are truly overhead right now.",
+    "While looking up, tap twice quickly. The clouds part and slide away, with a reminder of the One who commands them. They drift back on their own.",
+    "Drag left or right to stroll the garden. There is more of it on either side — the willow, the pond, whatever planted itself beyond the edges.",
+    "The My Garden button opens the scenes: five gardens, a Catskill evening, and a creator for making your own. You can also set rolling hills or Catskill mountains beyond any garden.",
+    "The gold Hourly sky button is the weather book: rain hour by hour, wind, and a live rain map centered on your town with a little pin where you are.",
+    "The sailboat button turns the garden into the river. In sailing mode the gold moves to Routes — plan a voyage stop by stop, or a road trip that names every town and its sky along the way. Star the places you love to keep them.",
+    "The compass follows the phone in your hand. Switch to Star finder and it shows which constellations are up right now, drawn right on the dial, with the one you are facing previewed below.",
+    "Tap the town name any time to move the garden somewhere else. Everything refreshes by itself — just come back at dusk sometime. The fireflies will be waiting."
+  ];
+  let tourIdx = 0;
+  function renderTour() {
+    el("tour-step").textContent = TOUR[tourIdx];
+    el("tour-back").style.visibility = tourIdx === 0 ? "hidden" : "visible";
+    el("tour-next").textContent = tourIdx === TOUR.length - 1 ? "Done" : "Next";
+    const dots = el("tour-dots"); dots.innerHTML = "";
+    TOUR.forEach((_, i) => {
+      const d = document.createElement("span");
+      d.className = "tdot" + (i === tourIdx ? " on" : "");
+      dots.appendChild(d);
+    });
+  }
+  function openTour() { tourIdx = 0; renderTour(); openSheet("tour"); }
 
   function openSheet(which) {
     el("sheet-" + which).classList.add("open");
@@ -1734,6 +1761,8 @@
     state.sail.on = on;
     el("sail-toggle").setAttribute("aria-pressed", on ? "true" : "false");
     el("open-route").style.display = on ? "" : "none";
+    el("open-route").classList.toggle("gold", on);
+    el("open-hours").classList.toggle("gold", !on);
     persist(); initParticles();
     toast(on ? "Sailing mode. Fair winds." : "Back to the garden.");
     if (on && !state.sail.stops.length) { renderRoute(); openSheet("route"); }
@@ -1798,7 +1827,20 @@
     el("loc-chip").onclick = openAbout;
     el("stop-add").onclick = addStop;
     el("stop-input").addEventListener("keydown", e => { if (e.key === "Enter") addStop(); });
-    el("open-scenes").onclick = () => { buildThemeChips(); openSheet("scenes"); };
+    el("open-scenes").onclick = () => {
+      buildThemeChips();
+      document.querySelectorAll("#backdrop-seg button").forEach(b => b.classList.toggle("on", b.dataset.v === state.settings.backdrop));
+      openSheet("scenes");
+    };
+    document.querySelectorAll("#backdrop-seg button").forEach(b => b.onclick = () => {
+      state.settings.backdrop = b.dataset.v;
+      document.querySelectorAll("#backdrop-seg button").forEach(x => x.classList.toggle("on", x === b));
+      persist();
+      toast(b.dataset.v === "mountains" ? "The Catskills rise beyond the garden" : "Rolling hills beyond the garden");
+    });
+    el("open-tour").onclick = () => { closeSheet(); openTour(); };
+    el("tour-next").onclick = () => { if (tourIdx >= TOUR.length - 1) { closeSheet(); } else { tourIdx++; renderTour(); } };
+    el("tour-back").onclick = () => { if (tourIdx > 0) { tourIdx--; renderTour(); } };
     el("open-compass").onclick = openCompass;
     window.addEventListener("deviceorientationabsolute", onHeading);
     window.addEventListener("deviceorientation", onHeading);
@@ -1872,7 +1914,7 @@
     window.addEventListener("resize", () => { clearTimeout(window.__rt); window.__rt = setTimeout(resize, 180); });
     buildThemeChips();
     wire();
-    if (state.sail.on) { el("sail-toggle").setAttribute("aria-pressed", "true"); el("open-route").style.display = ""; }
+    if (state.sail.on) { el("sail-toggle").setAttribute("aria-pressed", "true"); el("open-route").style.display = ""; el("open-route").classList.add("gold"); el("open-hours").classList.remove("gold"); }
     setVerse(pickVerse());
     updateConditions();
     renderHours();
@@ -1882,6 +1924,7 @@
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshData(); });
     registerSW();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutVerse);
+    if (!state.settings.tourSeen) { state.settings.tourSeen = true; persist(); setTimeout(openTour, 1200); }
     requestAnimationFrame(frame);
   }
 

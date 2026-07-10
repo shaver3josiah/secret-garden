@@ -759,3 +759,25 @@ button.chip-info:hover { border-color: var(--line-warm); background: rgba(255, 2
 .const-box { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 #const-canvas { width: 260px; height: 110px; }
 #const-note { text-align: center; font-weight: 600; color: var(--ink-soft); }
+
+.route-btn.gold {
+  color: #3a2c0c;
+  border-color: transparent;
+  background: linear-gradient(105deg, var(--honey) 0%, var(--honey-light) 45%, #F0D493 52%, var(--honey-light) 60%, var(--honey) 100%);
+  background-size: 200% 100%;
+  box-shadow: 0 8px 22px -12px rgba(180, 137, 77, 0.65);
+  animation: shimmer-drift 16s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+.hb-open:not(.gold) { color: var(--ink-soft); background: var(--panel); border-color: var(--line); box-shadow: 0 4px 16px -12px rgba(40, 60, 30, 0.4); animation: none; }
+
+.tour-step {
+  font-family: var(--font-heading);
+  font-size: 1.12rem;
+  line-height: 1.7;
+  color: var(--ink-soft);
+  min-height: 9.5em;
+  padding: 6px 2px 14px;
+}
+.tour-dots { display: flex; gap: 7px; justify-content: center; margin-bottom: 16px; }
+.tdot { width: 7px; height: 7px; border-radius: 50%; background: rgba(40, 60, 30, 0.18); transition: background 0.2s var(--ease), transform 0.2s var(--ease); }
+.tdot.on { background: var(--honey-deep); transform: scale(1.3); }
