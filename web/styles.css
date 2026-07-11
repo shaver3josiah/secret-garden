@@ -941,16 +941,16 @@ body.starfield #const-note { color: var(--honey-light); }
 .drawer .hours-bar .radar-open { grid-column: 1 / -1; }
 .drawer .hb-chip, .drawer .hb-open.gold, .drawer .hb-open:not(.gold), .drawer .radar-open { justify-content: center; width: 100%; }
 
-.place-group { display: flex; align-items: center; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 2px; }
-.place-group::-webkit-scrollbar { display: none; }
+.place-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px; }
+.place-group .chip { min-height: 46px; font-size: 0.95rem; padding: 10px 15px; }
 .place-label {
-  flex: 0 0 auto;
-  font-size: 0.72rem;
+  width: 100%;
+  font-size: 0.7rem;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--ink-muted);
-  min-width: 64px;
+  margin: 2px 2px -2px;
 }
 .place-count { margin-right: auto; align-self: center; font-weight: 600; color: var(--ink-muted); font-size: 0.9rem; }
 

@@ -449,7 +449,7 @@
     const df = dayFrac();
     return {
       x: celestialX(df),
-      y: horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8 - H * 0.07 * smooth(Math.sin(Math.PI * df) * 2),
+      y: horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8 - H * 0.02 * smooth(Math.sin(Math.PI * df) * 2),
       a: clamp(sunAltitude() / 0.12, 0, 1)
     };
   }
@@ -496,12 +496,12 @@
     const moonA = clamp(1 - alt / 0.14, 0, 1) * 0.92 * lookUp;
     if (moonA > 0.02) {
       const nf = nightFrac();
-      const mx = celestialX(nf), my = horizonY - Math.sin(Math.PI * nf) * horizonY * 0.7 + 12 - H * 0.07 * smooth(Math.sin(Math.PI * nf) * 2);
+      const mx = celestialX(nf), my = horizonY - Math.sin(Math.PI * nf) * horizonY * 0.7 + 12 - H * 0.02 * smooth(Math.sin(Math.PI * nf) * 2);
       drawMoon(mx, my, Math.max(14, U * 0.05), moonA);
     }
     if (sunA > 0.02) {
       const df = dayFrac();
-      const sx = celestialX(df), sy = horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8 - H * 0.07 * smooth(Math.sin(Math.PI * df) * 2);
+      const sx = celestialX(df), sy = horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8 - H * 0.02 * smooth(Math.sin(Math.PI * df) * 2);
       drawSun(sx, sy, Math.max(16, U * 0.055), sunA);
     }
   }
@@ -640,29 +640,36 @@
     ctx.globalAlpha = 1;
   }
   function drawCirrus(cx, cy, sc, seed, alpha) {
-    const wpx = Math.round(300 * sc / 8) * 8;
-    const spr = sprite("cir:" + seed + ":" + wpx, wpx, wpx * 0.3, (g2, w2, h2) => {
+    // mare's tails: swept wisps, each combed into fine bright fibers with an upturned hook
+    const wpx = Math.round(420 * sc / 8) * 8;
+    const spr = sprite("cir:" + seed + ":" + wpx, wpx, wpx * 0.36, (g2, w2, h2) => {
       const r = rng(seed + 5);
       g2.lineCap = "round";
-      for (let i = 0; i < 5; i++) {
-        const yy = h2 * (0.2 + i * 0.15) + (r() - 0.5) * h2 * 0.1;
-        const x0 = w2 * (0.02 + r() * 0.12), x1 = w2 * (0.75 + r() * 0.22);
-        const bow = (r() - 0.5) * h2 * 0.5;
-        const g = g2.createLinearGradient(x0, 0, x1, 0);
-        g.addColorStop(0, "rgba(255,255,255,0)");
-        g.addColorStop(0.25, "rgba(255,255,255," + (0.5 + r() * 0.3).toFixed(2) + ")");
-        g.addColorStop(0.8, "rgba(250,252,255," + (0.3 + r() * 0.2).toFixed(2) + ")");
-        g.addColorStop(1, "rgba(255,255,255,0)");
-        g2.strokeStyle = g;
-        g2.lineWidth = Math.max(1.6, h2 * (0.05 + r() * 0.06));
-        g2.beginPath();
-        g2.moveTo(x0, yy);
-        g2.quadraticCurveTo((x0 + x1) / 2, yy + bow, x1, yy - h2 * 0.08);
-        g2.stroke();
+      for (let i = 0; i < 7; i++) {
+        const yy = h2 * (0.14 + i * 0.115) + (r() - 0.5) * h2 * 0.05;
+        const x0 = w2 * (0.02 + r() * 0.08), x1 = w2 * (0.7 + r() * 0.28);
+        const bow = (r() - 0.4) * h2 * 0.32;
+        const hook = h2 * (0.1 + r() * 0.18);
+        for (let f = 0; f < 3; f++) {
+          const off = (f - 1) * h2 * (0.018 + r() * 0.015);
+          const al = (0.72 - f * 0.18) * (0.8 + r() * 0.35);
+          const g = g2.createLinearGradient(x0, 0, x1, 0);
+          g.addColorStop(0, "rgba(255,255,255,0)");
+          g.addColorStop(0.16, "rgba(255,255,255," + al.toFixed(2) + ")");
+          g.addColorStop(0.72, "rgba(246,250,255," + (al * 0.72).toFixed(2) + ")");
+          g.addColorStop(1, "rgba(255,255,255,0)");
+          g2.strokeStyle = g;
+          g2.lineWidth = Math.max(1, h2 * (0.024 + f * 0.014));
+          g2.beginPath();
+          g2.moveTo(x0, yy + off + hook);
+          g2.quadraticCurveTo(x0 + (x1 - x0) * 0.28, yy + off + bow * 0.35, (x0 + x1) / 2, yy + off + bow);
+          g2.quadraticCurveTo(x1 - (x1 - x0) * 0.18, yy + off + bow * 0.7, x1, yy + off - h2 * 0.07);
+          g2.stroke();
+        }
       }
     });
     ctx.globalAlpha = clamp(alpha, 0, 1);
-    ctx.drawImage(spr, cx - wpx / 2, cy - wpx * 0.15);
+    ctx.drawImage(spr, cx - wpx / 2, cy - wpx * 0.18);
     ctx.globalAlpha = 1;
   }
   function drawCumulonimbus(cx, cy, sc, seed, alpha, night) {
@@ -706,7 +713,7 @@
       const px = c.x + partShift(c.x);
       if (px < -260 * c.s || px > W + 260 * c.s) continue;
       const za = Math.min(1, c.op + 0.25) * smooth(cm * 2) * (1 - clearK * 0.2);
-      if (c.type === "cirrus") drawCirrus(px, cy, c.s, 40 + (c.sd % 5), za * 0.9);
+      if (c.type === "cirrus") drawCirrus(px, cy, Math.max(0.9, c.s), 40 + (c.sd % 5), za);
       else if (c.type === "cb") drawCumulonimbus(px, cy, c.s, 77, za, night);
       else drawCumulus(px, cy, 150 * c.s, 56 * c.s, 100 + (c.sd % 6), za, night, 0.8);
     }
@@ -889,6 +896,15 @@
       GE.pond.drawRipples(g2, L.pond, t, P, L.seed);
     }
     for (const gr of L.grass) GE.drawGrass(g2, { x: gr.x, base: gr.base, len: gr.len, w: gr.w, ph: gr.ph, lean: gr.lean, t: t, P: P, wind: wind });
+    // aerial haze sits on the ground and grass; trees and flowers stand clear of it
+    const G = H - horizonY;
+    if (!floraHaze) {
+      floraHaze = g2.createLinearGradient(0, horizonY, 0, horizonY + G * 0.5);
+      floraHaze.addColorStop(0, "rgba(214,224,229,0.26)");
+      floraHaze.addColorStop(1, "rgba(214,224,229,0)");
+    }
+    g2.fillStyle = floraHaze;
+    g2.fillRect(-W * 0.4, horizonY, W * 1.8, G * 0.5);
     const items = [];
     for (const tr of L.trees) items.push({ y: tr.y, d: () => GE.trees[tr.kind].draw(g2, { x: tr.x, baseY: tr.y, h: tr.h, seed: tr.seed, t: t, P: P, wind: wind }) });
     for (const f of L.flowers) {
@@ -907,15 +923,6 @@
     }
     items.sort((a, b) => a.y - b.y);
     for (const it of items) it.d();
-    // aerial perspective as one wash: the distance settles back, the foreground stays bright
-    const G = H - horizonY;
-    if (!floraHaze) {
-      floraHaze = g2.createLinearGradient(0, horizonY, 0, horizonY + G * 0.5);
-      floraHaze.addColorStop(0, "rgba(214,224,229,0.26)");
-      floraHaze.addColorStop(1, "rgba(214,224,229,0)");
-    }
-    g2.fillStyle = floraHaze;
-    g2.fillRect(-W * 0.4, horizonY, W * 1.8, G * 0.5);
   }
 
   // robin and nest live in the willow: fly in, feed the chicks, keep watch, fly off (40s loop)
@@ -1183,7 +1190,7 @@
     const dt = clamp(T - lastTs, 0, 80);
     if (driftActive() && !state.versePaused && !document.hidden) {
       sky.prog += dt / 42000;
-      if (sky.prog >= 1) { verseGapUntil = Date.now() + 7000; return; }
+      if (sky.prog >= 0.9) { verseGapUntil = Date.now() + 7000; return; }   // alpha hits zero by 0.9
     }
     if (!driftActive()) sky.prog = 0.5;
     const p = sky.prog;
@@ -1432,33 +1439,52 @@
     const mm = d.getUTCMinutes();
     return hh + ":" + (mm < 10 ? "0" : "") + mm + " " + ap;
   }
+  // the whole continental US at zoom 7; tiles load lazily as she scrolls
+  const US = { z: 7, x0: 18, x1: 39, y0: 43, y1: 53 };
+  let radarImgs = [];
+  function buildUsMap() {
+    const grid = el("map-grid");
+    const cols = US.x1 - US.x0 + 1, rows = US.y1 - US.y0 + 1;
+    grid.style.gridTemplateColumns = "repeat(" + cols + ", 1fr)";
+    grid.style.gridTemplateRows = "repeat(" + rows + ", 1fr)";
+    const wrap = grid.parentElement;
+    wrap.style.width = (cols * 100 / 3) + "%";
+    wrap.style.aspectRatio = cols + " / " + rows;
+    grid.innerHTML = ""; radarImgs = [];
+    for (let gy = 0; gy < rows; gy++) for (let gx = 0; gx < cols; gx++) {
+      const base = document.createElement("img");
+      base.alt = ""; base.loading = "lazy"; base.decoding = "async";
+      base.src = "https://tile.openstreetmap.org/" + US.z + "/" + (US.x0 + gx) + "/" + (US.y0 + gy) + ".png";
+      base.style.gridArea = (gy + 1) + " / " + (gx + 1);
+      grid.appendChild(base);
+      const rad = document.createElement("img");
+      rad.alt = ""; rad.loading = "lazy"; rad.decoding = "async"; rad.className = "radar-tile";
+      rad.style.gridArea = (gy + 1) + " / " + (gx + 1);
+      rad.__tx = US.x0 + gx; rad.__ty = US.y0 + gy;
+      grid.appendChild(rad);
+      radarImgs.push(rad);
+    }
+    grid.dataset.built = "us";
+  }
   function updateSat() {
     const grid = el("map-grid"); if (!grid) return;
-    const z = 7, m = mercXY(state.loc.lat, state.loc.lon, z);
-    const txc = Math.floor(m.xf), tyc = Math.floor(m.yf);
+    if (grid.dataset.built !== "us") buildUsMap();
+    const m = mercXY(state.loc.lat, state.loc.lon, US.z);
     const frames = state.rv && state.rv.frames || [];
     el("sat-scrub").min = -(Math.max(1, frames.length) - 1);
     const idx = frames.length ? clamp(frames.length - 1 + (+el("sat-scrub").value), 0, frames.length - 1) : -1;
     const fr = idx >= 0 ? frames[idx] : null;
-    grid.innerHTML = "";
-    for (let gy = 0; gy < 3; gy++) for (let gx = 0; gx < 3; gx++) {
-      const txx = ((txc - 1 + gx) % m.n + m.n) % m.n, tyy = clamp(tyc - 1 + gy, 0, m.n - 1);
-      const base = document.createElement("img");
-      base.alt = ""; base.loading = "lazy";
-      base.src = "https://tile.openstreetmap.org/" + z + "/" + txx + "/" + tyy + ".png";
-      base.style.gridArea = (gy + 1) + " / " + (gx + 1);
-      grid.appendChild(base);
-      if (fr) {
-        const rad = document.createElement("img");
-        rad.alt = ""; rad.className = "radar-tile";
-        rad.src = state.rv.host + fr.path + "/256/" + z + "/" + txx + "/" + tyy + "/2/1_1.png";
-        rad.style.gridArea = (gy + 1) + " / " + (gx + 1);
-        grid.appendChild(rad);
-      }
+    for (const rad of radarImgs) {
+      if (fr) rad.src = state.rv.host + fr.path + "/256/" + US.z + "/" + rad.__tx + "/" + rad.__ty + "/2/1_1.png";
+      else rad.removeAttribute("src");
     }
     grid.classList.toggle("radar-off", el("radar-toggle").textContent.indexOf("off") >= 0);
+    const cols = US.x1 - US.x0 + 1, rows = US.y1 - US.y0 + 1;
     const pin = document.querySelector(".map-pin");
-    if (pin) { pin.style.left = ((m.xf - (txc - 1)) / 3 * 100) + "%"; pin.style.top = ((m.yf - (tyc - 1)) / 3 * 100) + "%"; }
+    if (pin) {
+      pin.style.left = ((m.xf - US.x0) / cols * 100) + "%";
+      pin.style.top = ((m.yf - US.y0) / rows * 100) + "%";
+    }
     el("sat-time").textContent = fr
       ? fmtLocalTime(fr.time) + " \u00b7 " + Math.max(0, Math.round((Date.now() / 1000 - fr.time) / 60)) + " min ago"
       : "Radar loading";
@@ -1466,8 +1492,8 @@
     if (view && !view.__centered) {
       view.__centered = true;
       requestAnimationFrame(() => {
-        view.scrollLeft = (view.scrollWidth - view.clientWidth) * ((m.xf - (txc - 1)) / 3);
-        view.scrollTop = (view.scrollHeight - view.clientHeight) * ((m.yf - (tyc - 1)) / 3);
+        view.scrollLeft = view.scrollWidth * ((m.xf - US.x0) / cols) - view.clientWidth / 2;
+        view.scrollTop = view.scrollHeight * ((m.yf - US.y0) / rows) - view.clientHeight / 2;
       });
     }
   }
@@ -1773,10 +1799,28 @@
     el("compass-note").textContent = compassNote();
     if (Math.abs(((lastHeading - prevH + 540) % 360) - 180) > 4) drawConstPreview();
   }
-  let skyList = [], skyAt = 0;
+  let skyList = [], skyAt = 0, moonSky = null;
+  function moonEquatorial(date) {
+    // low-precision lunar position (a few degrees off at worst; plenty for a dial glyph)
+    const d = (date.getTime() / 86400000) - 10957.5;
+    const rad = Math.PI / 180;
+    const L = (218.316 + 13.176396 * d) * rad;
+    const M = (134.963 + 13.064993 * d) * rad;
+    const F = (93.272 + 13.229350 * d) * rad;
+    const lon = L + 6.289 * rad * Math.sin(M);
+    const lat = 5.128 * rad * Math.sin(F);
+    const e = 23.439 * rad;
+    const ra = Math.atan2(Math.sin(lon) * Math.cos(e) - Math.tan(lat) * Math.sin(e), Math.cos(lon));
+    const dec = Math.asin(Math.sin(lat) * Math.cos(e) + Math.cos(lat) * Math.sin(e) * Math.sin(lon));
+    return { ra: ((ra / rad / 15) + 24) % 24, dec: dec / rad };
+  }
   function refreshSkyList() {
     if (!window.Constellations) return;
-    skyList = Constellations.list(state.loc.lat, state.loc.lon, new Date());
+    const now = new Date();
+    skyList = Constellations.list(state.loc.lat, state.loc.lon, now);
+    const me = moonEquatorial(now);
+    const aa = Constellations.altAz(me.ra, me.dec, state.loc.lat, state.loc.lon, now);
+    moonSky = { az: aa.az, alt: aa.alt, up: aa.alt > 2, phase: moonPhase() };
     skyAt = Date.now();
     drawRoseGlyphs();
   }
@@ -1811,6 +1855,23 @@
       g.fillStyle = "rgba(61,75,54,0.85)";
       g.fillText(sc.name.slice(0, 3).toUpperCase(), gx, gy + box / 2 + 8);
     }
+    if (moonSky && moonSky.up) {
+      const a = (moonSky.az - 90) * Math.PI / 180;
+      const gx = cx + Math.cos(a) * rad, gy = cy + Math.sin(a) * rad;
+      const mr = Math.max(5, cs * 0.032), pph = moonSky.phase;
+      g.fillStyle = "rgba(140,150,172,0.55)";
+      g.beginPath(); g.arc(gx, gy, mr, 0, 6.2832); g.fill();
+      const cosA = Math.cos(pph * 2 * Math.PI);
+      g.fillStyle = "#EDE7D8";
+      g.beginPath();
+      g.arc(gx, gy, mr, -Math.PI / 2, Math.PI / 2, pph >= 0.5);
+      g.ellipse(gx, gy, Math.max(0.001, mr * Math.abs(cosA)), mr, 0, Math.PI / 2, Math.PI * 1.5, cosA <= 0);
+      g.closePath(); g.fill();
+      g.font = "600 " + Math.max(7, Math.round(cs * 0.042)) + "px 'DM Sans', sans-serif";
+      g.textAlign = "center";
+      g.fillStyle = "rgba(154,118,54,0.9)";
+      g.fillText("MOON", gx, gy + mr + 9);
+    }
   }
   function drawConstPreview() {
     const c = el("const-canvas"); if (!c || !window.Constellations) return;
@@ -1829,7 +1890,13 @@
     g.fillStyle = "#B4894D";
     for (const p of near.preview.pts) { g.beginPath(); g.arc(gx + p[0] * box, gy + p[1] * box, 2.4, 0, 6.2832); g.fill(); }
     const alt = near.alt < 25 ? "low" : near.alt < 55 ? "midway up" : "high overhead";
-    el("const-note").textContent = near.name + " — " + alt + " toward the " + compassPt(near.az) + (compassSeen ? ", close to where she is facing" : "");
+    let noteText = near.name + " \u2014 " + alt + " toward the " + compassPt(near.az);
+    if (moonSky) {
+      noteText += moonSky.up
+        ? " \u00b7 " + moonName(moonSky.phase).toLowerCase() + " toward the " + compassPt(moonSky.az)
+        : " \u00b7 the moon is below the horizon";
+    }
+    el("const-note").textContent = noteText;
   }
   function openCompass() {
     openSheet("compass");
@@ -2198,7 +2265,7 @@
       persist(); initParticles();
     });
     el("open-hours").onclick = () => { renderHours(); openSheet("hours"); };
-    el("open-radar").onclick = () => { renderHours(); updateSat(); openSheet("radar"); };
+    el("open-radar").onclick = () => { renderHours(); const v = el("map-view"); if (v) v.__centered = false; updateSat(); openSheet("radar"); };
     document.querySelectorAll("#hours-tabs button").forEach(b => b.onclick = () => {
       document.querySelectorAll("#hours-tabs button").forEach(x => x.classList.toggle("on", x === b));
       el("hours-rain").style.display = b.dataset.t === "rain" ? "" : "none";
@@ -2305,7 +2372,17 @@
           renderRoute(); renderTrip(); renderFavs(); openSheet("route");
           return;
         }
-        if (y < horizonY) setVerse(pickVerse());
+        if (y < horizonY) {
+          const xw = x + panX;
+          for (let ci = clouds.length - 1; ci >= 0; ci--) {
+            const c = clouds[ci];
+            if (Math.abs(xw - (c.x + partShift(c.x))) < 95 * c.s && Math.abs(y - (c.y + 30)) < 64 * c.s) {
+              clouds.splice(ci, 1);   // one soft pop; the sky refills on the next weather breath
+              return;
+            }
+          }
+          setVerse(pickVerse());
+        }
       }, 300);
     });
     stage.addEventListener("pointercancel", () => { dragY = null; dragMoved = false; dragAxis = null; });
