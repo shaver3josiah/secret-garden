@@ -291,6 +291,32 @@
     layoutVerse();
   }
 
+  // ---------- bounded caches: build expensive art once, blit it every frame ----------
+  const SPRITES = new Map();          // LRU, hard 6 MB pixel budget
+  let spriteBytes = 0;
+  function sprite(key, w, h, painter) {
+    let c = SPRITES.get(key);
+    if (c) { SPRITES.delete(key); SPRITES.set(key, c); return c; }
+    c = document.createElement("canvas");
+    c.width = Math.max(2, Math.round(w)); c.height = Math.max(2, Math.round(h));
+    painter(c.getContext("2d"), c.width, c.height);
+    spriteBytes += c.width * c.height * 4;
+    SPRITES.set(key, c);
+    while (spriteBytes > 6291456 && SPRITES.size > 1) {
+      const e = SPRITES.entries().next().value;
+      SPRITES.delete(e[0]); spriteBytes -= e[1].width * e[1].height * 4;
+    }
+    return c;
+  }
+  const GRADS = new Map();            // CanvasGradients keyed by colors+geometry
+  function cachedGrad(key, make) {
+    let g = GRADS.get(key);
+    if (!g) { if (GRADS.size > 96) GRADS.clear(); g = make(); GRADS.set(key, g); }
+    return g;
+  }
+  function clearArtCaches() { SPRITES.clear(); spriteBytes = 0; GRADS.clear(); floraHaze = null; }
+  let floraHaze = null;
+
   let rain = [], snow = [], petals = [], pollen = [], flies = [], clouds = [];
   function wxKind() {
     const c = state.weather.code;
@@ -302,7 +328,7 @@
   function initParticles() {
     const calm = state.settings.skyMode === "cycle";   // day cycle: nice weather, always
     const scale = clamp(W / 1100, 0.4, 1.2), k = calm ? "clear" : wxKind(), th = activeTheme();
-    const heavy = motionOn() ? 1 : 0.25;
+    const heavy = (motionOn() ? 1 : 0.25) * (perfTier ? 0.55 : 1);
     rain = []; snow = []; petals = []; pollen = []; flies = []; clouds = [];
     const cloudN = clamp(Math.round(2 + state.weather.cloud / 16), 2, 9);
     for (let i = 0; i < cloudN; i++) clouds.push({ x: Math.random() * W * 1.2 - W * 0.1, y: (0.08 + Math.random() * 0.45) * horizonY, s: (0.6 + Math.random() * 1.1) * clamp(U / 700, 0.55, 1.25), sp: 0.004 + Math.random() * 0.01, op: 0.35 + Math.random() * 0.4 });
@@ -342,20 +368,25 @@
 
   function drawSky() {
     const s = skyColors();
-    const g = ctx.createLinearGradient(0, 0, 0, horizonY);
-    g.addColorStop(0, rgb(s.top));
-    g.addColorStop(1, rgb(s.hor));
+    const tc = rgb(s.top), hc = rgb(s.hor);
+    const g = cachedGrad("sky:" + tc + hc, () => {
+      const gg = ctx.createLinearGradient(0, 0, 0, horizonY);
+      gg.addColorStop(0, tc); gg.addColorStop(1, hc);
+      return gg;
+    });
     ctx.fillStyle = g;
     ctx.fillRect(-W * 0.4, 0, W * 1.8, horizonY);
   }
 
   function drawGround() {
     const alt = sunAltitude();
-    const groundNear = mix(hexToRgb("#36442a"), hexToRgb("#70895a"), smooth(alt / 0.3));
-    const groundFar = mix(hexToRgb("#647d4b"), hexToRgb("#b2c79e"), smooth(alt / 0.3));
-    const gg = ctx.createLinearGradient(0, horizonY, 0, H);
-    gg.addColorStop(0, rgb(groundFar));
-    gg.addColorStop(1, rgb(groundNear));
+    const groundNear = rgb(mix(hexToRgb("#36442a"), hexToRgb("#70895a"), smooth(alt / 0.3)));
+    const groundFar = rgb(mix(hexToRgb("#647d4b"), hexToRgb("#b2c79e"), smooth(alt / 0.3)));
+    const gg = cachedGrad("gnd:" + groundFar + groundNear, () => {
+      const g2 = ctx.createLinearGradient(0, horizonY, 0, H);
+      g2.addColorStop(0, groundFar); g2.addColorStop(1, groundNear);
+      return g2;
+    });
     ctx.fillStyle = gg;
     ctx.fillRect(-W * 0.4, horizonY, W * 1.8, H - horizonY);
   }
@@ -373,35 +404,42 @@
   }
 
   function drawSun(cx, cy, r, alpha) {
-    ctx.save();
+    const R = Math.round(r);
+    const spr = sprite("sun:" + R, R * 6.6, R * 6.6, (g2, w2) => {
+      const c = w2 / 2;
+      const g = g2.createRadialGradient(c, c, R * 0.2, c, c, R * 3.2);
+      g.addColorStop(0, "rgba(255,244,206,0.85)");
+      g.addColorStop(0.25, "rgba(250,222,150,0.4)");
+      g.addColorStop(1, "rgba(250,222,150,0)");
+      g2.fillStyle = g; g2.beginPath(); g2.arc(c, c, R * 3.2, 0, 6.2832); g2.fill();
+      const d = g2.createRadialGradient(c - R * 0.2, c - R * 0.2, R * 0.1, c, c, R);
+      d.addColorStop(0, "#FFF7DC"); d.addColorStop(1, "#F6CD6B");
+      g2.fillStyle = d; g2.beginPath(); g2.arc(c, c, R, 0, 6.2832); g2.fill();
+    });
     ctx.globalAlpha = alpha;
-    const g = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 3.2);
-    g.addColorStop(0, "rgba(255,244,206,0.85)");
-    g.addColorStop(0.25, "rgba(250,222,150,0.4)");
-    g.addColorStop(1, "rgba(250,222,150,0)");
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r * 3.2, 0, 6.2832); ctx.fill();
-    const d = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.2, r * 0.1, cx, cy, r);
-    d.addColorStop(0, "#FFF7DC"); d.addColorStop(1, "#F6CD6B");
-    ctx.fillStyle = d; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.fill();
-    ctx.restore();
+    ctx.drawImage(spr, cx - spr.width / 2, cy - spr.height / 2);
+    ctx.globalAlpha = 1;
   }
 
   function drawMoon(cx, cy, r, alpha) {
-    const p = moonPhase();
-    ctx.save();
+    const p = moonPhase(), R = Math.round(r), pb = Math.round(p * 60);
+    const spr = sprite("moon:" + R + ":" + pb, R * 5.4, R * 5.4, (g2, w2) => {
+      const c = w2 / 2;
+      const g = g2.createRadialGradient(c, c, R * 0.5, c, c, R * 2.6);
+      g.addColorStop(0, "rgba(238,238,220,0.45)"); g.addColorStop(1, "rgba(238,238,220,0)");
+      g2.fillStyle = g; g2.beginPath(); g2.arc(c, c, R * 2.6, 0, 6.2832); g2.fill();
+      g2.translate(c, c);
+      g2.beginPath(); g2.arc(0, 0, R, 0, 6.2832); g2.fillStyle = "rgba(120,132,156,0.5)"; g2.fill();
+      const a = p * 2 * Math.PI, cosA = Math.cos(a);
+      g2.beginPath();
+      g2.arc(0, 0, R, -Math.PI / 2, Math.PI / 2, p >= 0.5);
+      g2.ellipse(0, 0, Math.max(0.001, R * Math.abs(cosA)), R, 0, Math.PI / 2, Math.PI * 1.5, cosA <= 0);
+      g2.closePath();
+      g2.fillStyle = "#F7F2E0"; g2.fill();
+    });
     ctx.globalAlpha = alpha;
-    const g = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, r * 2.6);
-    g.addColorStop(0, "rgba(238,238,220,0.45)"); g.addColorStop(1, "rgba(238,238,220,0)");
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r * 2.6, 0, 6.2832); ctx.fill();
-    ctx.translate(cx, cy);
-    ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.2832); ctx.fillStyle = "rgba(120,132,156,0.5)"; ctx.fill();
-    const a = p * 2 * Math.PI, cosA = Math.cos(a);
-    ctx.beginPath();
-    ctx.arc(0, 0, r, -Math.PI / 2, Math.PI / 2, p >= 0.5);
-    ctx.ellipse(0, 0, Math.max(0.001, r * Math.abs(cosA)), r, 0, Math.PI / 2, Math.PI * 1.5, cosA <= 0);
-    ctx.closePath();
-    ctx.fillStyle = "#F7F2E0"; ctx.fill();
-    ctx.restore();
+    ctx.drawImage(spr, cx - spr.width / 2, cy - spr.height / 2);
+    ctx.globalAlpha = 1;
   }
 
   function celestialX(frac) { return W * (0.14 + 0.72 * frac); }
@@ -420,24 +458,34 @@
     const k = clamp(1 - Math.abs(cov - 56) / 34, 0.2, 1);   // strongest at broken cover
     const base = 0.1 * sp.a * k * (1 - smooth(cam * 1.4));
     if (base < 0.01) return;
+    // fan baked once at half resolution; per frame: one rotated blit
+    const maxLen = H * 0.69;
+    const spr = sprite("rays:" + Math.round(maxLen), maxLen * 1.6, maxLen * 1.05, (g2, w2) => {
+      g2.scale(0.5, 0.5);
+      const ox = w2, oy = 8;
+      for (let i = 0; i < 7; i++) {
+        const a = (-0.5 + i / 6) * 1.5 + Math.PI / 2;
+        const len = H * (0.45 + (i % 3) * 0.12) * 2;
+        const wHalf = (14 + (i % 2) * 10) * 2;
+        const g = g2.createLinearGradient(ox, oy, ox + Math.cos(a) * len, oy + Math.sin(a) * len);
+        g.addColorStop(0, "rgba(255,240,200," + (0.8 + (i % 2) * 0.2).toFixed(2) + ")");
+        g.addColorStop(1, "rgba(255,240,200,0)");
+        g2.fillStyle = g;
+        g2.beginPath();
+        g2.moveTo(ox, oy);
+        g2.lineTo(ox + Math.cos(a) * len - Math.sin(a) * wHalf, oy + Math.sin(a) * len + Math.cos(a) * wHalf);
+        g2.lineTo(ox + Math.cos(a) * len + Math.sin(a) * wHalf, oy + Math.sin(a) * len - Math.cos(a) * wHalf);
+        g2.closePath(); g2.fill();
+      }
+    });
+    const rot = motionOn() ? Math.sin(T * 0.00006) * 0.15 : 0;
     ctx.save();
     ctx.translate(sp.x, sp.y);
-    const rot = motionOn() ? Math.sin(T * 0.00006) * 0.15 : 0;
-    for (let i = 0; i < 7; i++) {
-      const a = (-0.5 + i / 6) * 1.5 + Math.PI / 2 + rot;
-      const len = H * (0.45 + (i % 3) * 0.12);
-      const wHalf = 14 + (i % 2) * 10;
-      const g = ctx.createLinearGradient(0, 0, Math.cos(a) * len, Math.sin(a) * len);
-      g.addColorStop(0, "rgba(255,240,200," + (base * (0.8 + (i % 2) * 0.2)).toFixed(3) + ")");
-      g.addColorStop(1, "rgba(255,240,200,0)");
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(Math.cos(a) * len - Math.sin(a) * wHalf, Math.sin(a) * len + Math.cos(a) * wHalf);
-      ctx.lineTo(Math.cos(a) * len + Math.sin(a) * wHalf, Math.sin(a) * len - Math.cos(a) * wHalf);
-      ctx.closePath(); ctx.fill();
-    }
+    ctx.rotate(rot);
+    ctx.globalAlpha = base;
+    ctx.drawImage(spr, -spr.width / 2, -8);
     ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   function drawCelestial() {
@@ -458,16 +506,21 @@
   }
 
   function puff(x, y, s, op) {
-    ctx.save();
-    ctx.globalAlpha = op;
-    for (const o of [[0, 0, 1], [-0.7, 0.15, 0.75], [0.7, 0.15, 0.75], [-0.35, -0.25, 0.7], [0.35, -0.2, 0.7]]) {
-      const rr = 26 * s * o[2];
-      const g = ctx.createRadialGradient(x + o[0] * 30 * s, y + o[1] * 22 * s, rr * 0.3, x + o[0] * 30 * s, y + o[1] * 22 * s, rr);
-      g.addColorStop(0, "rgba(255,255,255,0.95)");
-      g.addColorStop(1, "rgba(236,240,236,0)");
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x + o[0] * 30 * s, y + o[1] * 22 * s, rr, 0, 6.2832); ctx.fill();
-    }
-    ctx.restore();
+    // one baked puff, drawn scaled — no per-frame gradients
+    const spr = sprite("puff", 200, 152, (g2) => {
+      const px = 100, py = 82, S = 1.6;
+      for (const o of [[0, 0, 1], [-0.7, 0.15, 0.75], [0.7, 0.15, 0.75], [-0.35, -0.25, 0.7], [0.35, -0.2, 0.7]]) {
+        const rr = 26 * S * o[2];
+        const bx = px + o[0] * 30 * S, by = py + o[1] * 22 * S;
+        const g = g2.createRadialGradient(bx, by, rr * 0.3, bx, by, rr);
+        g.addColorStop(0, "rgba(255,255,255,0.95)"); g.addColorStop(1, "rgba(236,240,236,0)");
+        g2.fillStyle = g; g2.beginPath(); g2.arc(bx, by, rr, 0, 6.2832); g2.fill();
+      }
+    });
+    const k = s / 1.6;
+    ctx.globalAlpha = clamp(op, 0, 1);
+    ctx.drawImage(spr, x - 100 * k, y - 82 * k, 200 * k, 152 * k);
+    ctx.globalAlpha = 1;
   }
   // ponytail: clouds part for 90s after a double-tap, then drift back
   let clearK = 0, clearUntil = 0;
@@ -543,29 +596,42 @@
     if (r() > 0.45) lobes.push({ x: cx - w * (0.3 + r() * 0.04), y: cy - h * (0.24 + r() * 0.1), r: h * (0.36 + r() * 0.1) });
     return lobes;
   }
-  function traceLobes(lobes) {
-    ctx.beginPath();
-    for (const d of lobes) { ctx.moveTo(d.x + d.r, d.y); ctx.arc(d.x, d.y, d.r, 0, 6.2832); }
+  function traceLobes(g2, lobes) {
+    g2.beginPath();
+    for (const d of lobes) { g2.moveTo(d.x + d.r, d.y); g2.arc(d.x, d.y, d.r, 0, 6.2832); }
   }
-  function drawCumulus(cx, cy, w, h, seed, alpha, night) {
+  function paintCumulus(g2, cx, cy, w, h, seed, night) {
     const lobes = cumulusLobes(cx, cy, w, h, seed);
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = night ? "rgba(228,233,243,0.97)" : "rgba(253,254,252,0.97)";
-    traceLobes(lobes); ctx.fill();
-    traceLobes(lobes); ctx.clip();
-    const g = ctx.createLinearGradient(0, cy - h * 0.7, 0, cy + h * 0.52);
+    g2.save();
+    g2.fillStyle = night ? "rgba(228,233,243,0.97)" : "rgba(253,254,252,0.97)";
+    traceLobes(g2, lobes); g2.fill();
+    traceLobes(g2, lobes); g2.clip();
+    const g = g2.createLinearGradient(0, cy - h * 0.7, 0, cy + h * 0.52);
     g.addColorStop(0, "rgba(255,255,255,0.9)");
     g.addColorStop(0.55, "rgba(255,255,255,0)");
     g.addColorStop(1, night ? "rgba(118,132,158,0.5)" : "rgba(191,202,209,0.55)");
-    ctx.fillStyle = g;
-    ctx.fillRect(cx - w, cy - h * 1.4, w * 2, h * 2.4);
-    const hl = ctx.createRadialGradient(cx - w * 0.18, cy - h * 0.5, 4, cx - w * 0.18, cy - h * 0.5, w * 0.4);
+    g2.fillStyle = g;
+    g2.fillRect(cx - w, cy - h * 1.4, w * 2, h * 2.4);
+    const hl = g2.createRadialGradient(cx - w * 0.18, cy - h * 0.5, 4, cx - w * 0.18, cy - h * 0.5, w * 0.4);
     hl.addColorStop(0, night ? "rgba(246,248,254,0.5)" : "rgba(255,252,240,0.65)");
     hl.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = hl;
-    ctx.fillRect(cx - w, cy - h * 1.4, w * 2, h * 2.4);
-    ctx.restore();
+    g2.fillStyle = hl;
+    g2.fillRect(cx - w, cy - h * 1.4, w * 2, h * 2.4);
+    g2.restore();
+  }
+  // res 1 = full (verse hero), 0.5 = zenith field
+  function drawCumulus(cx, cy, w, h, seed, alpha, night, res) {
+    const q = res || 1;
+    const wb = Math.round(w / 8) * 8, hb = Math.round(h / 8) * 8;
+    const padX = wb * 0.5 + hb * 0.85, padTop = hb * 1.05, padBot = hb * 0.7;
+    const spr = sprite("cum:" + seed + ":" + wb + ":" + hb + ":" + (night ? 1 : 0) + ":" + q,
+      (wb + padX * 2) * q, (padTop + padBot) * q, (g2) => {
+        g2.scale(q, q);
+        paintCumulus(g2, wb / 2 + padX, padTop, wb, hb, seed, night);
+      });
+    ctx.globalAlpha = clamp(alpha, 0, 1);
+    ctx.drawImage(spr, cx - (wb / 2 + padX), cy - padTop, wb + padX * 2, padTop + padBot);
+    ctx.globalAlpha = 1;
   }
   function camOffset() { return smooth(cam) * H * 1.04; }
   function drawZenith(oy) {
@@ -588,7 +654,7 @@
       if (cy < -160 || cy > oy + 160) continue;
       const px = c.x + partShift(c.x);
       if (px < -260 * c.s || px > W + 260 * c.s) continue;
-      drawCumulus(px, cy, 150 * c.s, 56 * c.s, c.sd, Math.min(1, c.op + 0.25) * smooth(cm * 2) * (1 - clearK * 0.2), night);
+      drawCumulus(px, cy, 150 * c.s, 56 * c.s, 100 + (c.sd % 6), Math.min(1, c.op + 0.25) * smooth(cm * 2) * (1 - clearK * 0.2), night, 0.5);
     }
   }
   function drawSkyHud() {
@@ -709,6 +775,13 @@
   }
 
   function windAmp() { return motionOn() ? clamp(state.weather.wind / 20, 0.2, 1.5) : 0; }
+  function glowSprite() {
+    return sprite("glow", 16, 16, (g2) => {
+      const g = g2.createRadialGradient(8, 8, 0, 8, 8, 7);
+      g.addColorStop(0, "rgba(250,240,150,1)"); g.addColorStop(1, "rgba(250,240,150,0)");
+      g2.fillStyle = g; g2.beginPath(); g2.arc(8, 8, 7, 0, 6.2832); g2.fill();
+    });
+  }
 
   // ---------- the garden, painted by the Claude Design element library ----------
   // ponytail: flora (pond, trees, flowers, grass) renders to an offscreen layer every
@@ -717,17 +790,20 @@
   const gcv = document.createElement("canvas");
   const gctx = gcv.getContext("2d");
   let gFrame = 0;
+  // ponytail: two quality tiers, switched by measured frame time — no settings, no drama
+  let ftAvg = 16, floraEvery = 2, perfTier = 0, tierCheck = 0;
   function drawGardenScene() {
     if (!L) return;
     const P = gePalette(), t = motionOn() ? T * 0.001 : 0, wind = windAmp() || 0.35;
     gFrame++;
-    const bw = Math.round(W * 1.8 * DPR), bh = cv.height;
+    const FDPR = Math.min(DPR, 1.5);   // flora is soft art; 1.5x is indistinguishable and 44% lighter
+    const bw = Math.round(W * 1.8 * FDPR), bh = Math.round(H * FDPR);
     if (gcv.width !== bw || gcv.height !== bh) {
       gcv.width = bw; gcv.height = bh;
       gFrame = 0;
     }
-    if (gFrame % 2 === 0 || gFrame === 1) {
-      gctx.setTransform(DPR, 0, 0, DPR, W * 0.4 * DPR, 0);
+    if (gFrame % floraEvery === 0 || gFrame === 1) {
+      gctx.setTransform(FDPR, 0, 0, FDPR, W * 0.4 * FDPR, 0);
       gctx.clearRect(-W * 0.4, 0, W * 1.8, H);
       paintFlora(gctx, P, t, wind);
     }
@@ -757,13 +833,16 @@
     }
     for (const g of L.grass) items.push({ y: g.base, d: () => GE.drawGrass(g2, { x: g.x, base: g.base, len: g.len, w: g.w, ph: g.ph, lean: g.lean, t: t, P: P, wind: wind }) });
     items.sort((a, b) => a.y - b.y);
+    for (const it of items) it.d();
+    // aerial perspective as one wash: the distance settles back, the foreground stays bright
     const G = H - horizonY;
-    for (const it of items) {
-      const depth = clamp((it.y - horizonY) / G, 0, 1);
-      g2.filter = "brightness(" + (0.88 + 0.18 * depth).toFixed(3) + ") saturate(" + (0.8 + 0.3 * depth).toFixed(3) + ")";
-      it.d();
+    if (!floraHaze) {
+      floraHaze = g2.createLinearGradient(0, horizonY, 0, horizonY + G * 0.5);
+      floraHaze.addColorStop(0, "rgba(214,224,229,0.26)");
+      floraHaze.addColorStop(1, "rgba(214,224,229,0)");
     }
-    g2.filter = "none";
+    g2.fillStyle = floraHaze;
+    g2.fillRect(-W * 0.4, horizonY, W * 1.8, G * 0.5);
   }
 
   // robin and nest live in the willow: fly in, feed the chicks, keep watch, fly off (40s loop)
@@ -903,9 +982,7 @@
           if (fl.x > W * 0.24 && fl.x < W * 0.76) continue;
           const glow = (0.4 + 0.6 * Math.abs(Math.sin(T * 0.003 + fl.ph))) * nf;
           ctx.globalAlpha = glow;
-          const g = ctx.createRadialGradient(fl.x, fl.y, 0, fl.x, fl.y, 7);
-          g.addColorStop(0, "rgba(250,240,150,1)"); g.addColorStop(1, "rgba(250,240,150,0)");
-          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(fl.x, fl.y, 7, 0, 6.2832); ctx.fill();
+          ctx.drawImage(glowSprite(), fl.x - 8, fl.y - 8);
         }
         ctx.globalAlpha = 1;
       }
@@ -933,9 +1010,7 @@
         if (motionOn()) { fl.x += fl.dx; fl.y += fl.dy; if (Math.random() < 0.02) { fl.dx = (Math.random() - 0.5) * 0.5; fl.dy = (Math.random() - 0.5) * 0.5; } if (fl.x < 0 || fl.x > W) fl.dx *= -1; if (fl.y < horizonY * 0.6 || fl.y > H) fl.dy *= -1; }
         const glow = (0.4 + 0.6 * Math.abs(Math.sin(T * 0.003 + fl.ph))) * nf;
         ctx.globalAlpha = glow;
-        const g = ctx.createRadialGradient(fl.x, fl.y, 0, fl.x, fl.y, 7);
-        g.addColorStop(0, "rgba(250,240,150,1)"); g.addColorStop(1, "rgba(250,240,150,0)");
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(fl.x, fl.y, 7, 0, 6.2832); ctx.fill();
+        ctx.drawImage(glowSprite(), fl.x - 8, fl.y - 8);
       }
       ctx.globalAlpha = 1;
     }
@@ -963,12 +1038,15 @@
   let flashT = 0;
   function drawFog() {
     const k = wxKind();
-    const haze = k === "fog" ? 0.5 : clamp(((state.aqi || 0) - 80) / 120, 0, 0.4);
+    const haze = k === "fog" ? 0.5 : clamp(Math.round(((state.aqi || 0) - 80) / 120 * 50) / 50, 0, 0.4);
     if (haze > 0.02) {
-      const g = ctx.createLinearGradient(0, horizonY - H * 0.2, 0, H);
-      g.addColorStop(0, "rgba(226,230,228,0)");
-      g.addColorStop(0.5, "rgba(226,230,228," + (haze * 0.7) + ")");
-      g.addColorStop(1, "rgba(214,220,216," + haze + ")");
+      const g = cachedGrad("fog:" + haze, () => {
+        const gg = ctx.createLinearGradient(0, horizonY - H * 0.2, 0, H);
+        gg.addColorStop(0, "rgba(226,230,228,0)");
+        gg.addColorStop(0.5, "rgba(226,230,228," + (haze * 0.7) + ")");
+        gg.addColorStop(1, "rgba(214,220,216," + haze + ")");
+        return gg;
+      });
       ctx.fillStyle = g; ctx.fillRect(-W * 0.4, horizonY - H * 0.2, W * 1.8, H - horizonY + H * 0.2);
     }
     if (state.weather.code >= 95 && motionOn() && state.settings.skyMode !== "cycle") {
@@ -981,10 +1059,14 @@
     const alt = sunAltitude();
     if (alt < 0.05) return;
     const df = dayFrac();
-    const sx = celestialX(df);
-    const g = ctx.createRadialGradient(sx, horizonY * 0.2, 0, sx, horizonY * 0.2, H * 0.9);
-    g.addColorStop(0, "rgba(255,246,214," + (0.1 * smooth(alt / 0.4)) + ")");
-    g.addColorStop(1, "rgba(255,246,214,0)");
+    const sx = Math.round(celestialX(df) / 12) * 12;             // bucket so the gradient caches
+    const a = Math.round(0.1 * smooth(alt / 0.4) * 100) / 100;
+    const g = cachedGrad("wash:" + sx + ":" + a, () => {
+      const gg = ctx.createRadialGradient(sx, horizonY * 0.2, 0, sx, horizonY * 0.2, H * 0.9);
+      gg.addColorStop(0, "rgba(255,246,214," + a + ")");
+      gg.addColorStop(1, "rgba(255,246,214,0)");
+      return gg;
+    });
     ctx.fillStyle = g; ctx.fillRect(-W * 0.4, 0, W * 1.8, H);
   }
 
@@ -1064,6 +1146,13 @@
   function frame(ts) {
     lastTs = T;
     T = ts || 0;
+    const fdt = T - lastTs;
+    if (fdt > 0 && fdt < 400) ftAvg += (fdt - ftAvg) * 0.04;
+    if (++tierCheck >= 150) {
+      tierCheck = 0;
+      if (perfTier === 0 && ftAvg > 34) { perfTier = 1; floraEvery = 3; initParticles(); }
+      else if (perfTier === 1 && ftAvg < 22) { perfTier = 0; floraEvery = 2; initParticles(); }
+    }
     if (dragY === null && (cam > 0.0005 || camTarget > 0)) {
       camVel += (camTarget - cam) * 0.026;          // soft spring, settles ~600ms
       camVel *= 0.86;
@@ -1116,6 +1205,7 @@
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
     cv.style.width = W + "px"; cv.style.height = H + "px";
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    clearArtCaches();
     buildScene();
   }
 
