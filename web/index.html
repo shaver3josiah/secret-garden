@@ -52,6 +52,7 @@
     <a class="hb-chip" id="hb-wind-link" target="_blank" rel="noopener" aria-label="Check wind forecast on Google"><span class="glyph">&#127788;&#65039;</span><b id="hb-wind">--</b></a>
     <a class="hb-chip" id="hb-cloud-link" target="_blank" rel="noopener" aria-label="Check cloud cover on Google"><span class="glyph">&#9729;&#65039;</span><b id="hb-cloud">--%</b></a>
     <button class="chip hb-open gold" id="open-hours"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="3.2" stroke="currentColor" stroke-width="1.6"/><path d="M8 1.6v1.7M8 12.7v1.7M1.6 8h1.7M12.7 8h1.7M3.5 3.5l1.2 1.2M11.3 11.3l1.2 1.2M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Hourly sky</button>
+    <button class="chip radar-open" id="open-radar"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 8 L13.5 3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><path d="M11.4 8a3.4 3.4 0 1 1-3.4-3.4M14.4 8A6.4 6.4 0 1 1 8 1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>Radar</button>
   </div>
 
   <nav class="dock" aria-label="Garden themes and tools">
@@ -77,6 +78,7 @@
 <div class="placebar" id="placebar" style="display:none">
   <div class="place-kinds" id="place-kinds"></div>
   <div class="place-actions">
+    <span class="place-count" id="place-count"></span>
     <button class="chip" id="place-undo">Undo</button>
     <button class="chip" id="place-clear">Clear</button>
     <button class="chip gold-chip" id="place-done">Done</button>
@@ -149,23 +151,29 @@
     <div class="seg" id="hours-tabs">
       <button data-t="rain" class="on">Rain</button>
       <button data-t="wind">Wind</button>
-      <button data-t="sky">Radar map</button>
     </div>
   </div>
   <div class="hours-panel" id="hours-rain"></div>
   <div class="hours-panel" id="hours-wind" style="display:none"></div>
-  <div class="hours-panel" id="hours-sky" style="display:none">
+</section>
+
+<section class="sheet" id="sheet-radar" role="dialog" aria-label="Rain radar map">
+  <div class="sheet-head">
+    <h2>Rain <span class="em">radar</span></h2>
+    <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <div class="map-view" id="map-view">
     <div class="map-wrap">
       <div class="map-grid" id="map-grid"></div>
       <span class="map-pin" aria-hidden="true"></span>
     </div>
-    <div class="sat-controls">
-      <input type="range" id="sat-scrub" min="-6" max="0" value="0" step="1" aria-label="Radar frames back">
-      <div class="sat-row"><span id="sat-time">Latest radar</span><button class="chip" id="radar-toggle">Rain radar on</button></div>
-    </div>
-    <div id="hours-cloud"></div>
-    <p class="about credit">Map &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Radar by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>.</p>
   </div>
+  <div class="sat-controls">
+    <input type="range" id="sat-scrub" min="-6" max="0" value="0" step="1" aria-label="Radar frames back">
+    <div class="sat-row"><span id="sat-time">Latest radar</span><button class="chip" id="radar-toggle">Rain radar on</button></div>
+  </div>
+  <div id="hours-cloud"></div>
+  <p class="about credit">Map &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Radar by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>. Drag the map to look around.</p>
 </section>
 
 <section class="sheet" id="sheet-verses" role="dialog" aria-label="Her verses">

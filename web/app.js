@@ -269,6 +269,7 @@
         const px = (-0.35 + p.nx * 1.7) * W, py = horizonY + p.ny * G;
         const sc = 0.42 + 0.78 * p.ny;
         if (p.t === "tree") L.trees.push({ kind: p.kind, x: px, y: py, h: G * 0.95 * sc, seed: p.seed });
+        else if (p.t === "bush") L.flowers.push({ kind: "bush", x: px, y: py, h: G * 0.2 * sc, seed: p.seed });
         else L.flowers.push({ kind: p.kind, x: px, y: py, h: G * 0.26 * sc, seed: p.seed });
       }
     } else if (L.trees.length && !L.trees.some(t => t.kind === "willow")) {
@@ -302,7 +303,7 @@
     painter(c.getContext("2d"), c.width, c.height);
     spriteBytes += c.width * c.height * 4;
     SPRITES.set(key, c);
-    while (spriteBytes > 6291456 && SPRITES.size > 1) {
+    while (spriteBytes > 8388608 && SPRITES.size > 1) {
       const e = SPRITES.entries().next().value;
       SPRITES.delete(e[0]); spriteBytes -= e[1].width * e[1].height * 4;
     }
@@ -448,7 +449,7 @@
     const df = dayFrac();
     return {
       x: celestialX(df),
-      y: horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8 - H * 0.125 * smooth(Math.sin(Math.PI * df) * 2),
+      y: horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8 - H * 0.07 * smooth(Math.sin(Math.PI * df) * 2),
       a: clamp(sunAltitude() / 0.12, 0, 1)
     };
   }
@@ -495,12 +496,12 @@
     const moonA = clamp(1 - alt / 0.14, 0, 1) * 0.92 * lookUp;
     if (moonA > 0.02) {
       const nf = nightFrac();
-      const mx = celestialX(nf), my = horizonY - Math.sin(Math.PI * nf) * horizonY * 0.7 + 12 - H * 0.125 * smooth(Math.sin(Math.PI * nf) * 2);
+      const mx = celestialX(nf), my = horizonY - Math.sin(Math.PI * nf) * horizonY * 0.7 + 12 - H * 0.07 * smooth(Math.sin(Math.PI * nf) * 2);
       drawMoon(mx, my, Math.max(14, U * 0.05), moonA);
     }
     if (sunA > 0.02) {
       const df = dayFrac();
-      const sx = celestialX(df), sy = horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8 - H * 0.125 * smooth(Math.sin(Math.PI * df) * 2);
+      const sx = celestialX(df), sy = horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8 - H * 0.07 * smooth(Math.sin(Math.PI * df) * 2);
       drawSun(sx, sy, Math.max(16, U * 0.055), sunA);
     }
   }
@@ -571,12 +572,17 @@
         }
       }
     }
+    const stormy = state.weather.code >= 95 || state.weather.code >= 80;
     for (let i = 0; i < n; i++) {
       const big = i % 3 === 0;
       const s = (big ? 1.3 + r() * 1.3 : 0.35 + r() * 0.7) * clamp(U / 700, 0.6, 1.3);
       let y = r() * H * 1.35 - H * 0.2;
       if (!heavy && y * 1.12 > bandT && y * 1.12 < bandB) y = (r() > 0.5 ? bandB + r() * H * 0.3 : bandT - H * 0.16 - r() * H * 0.3) / 1.12;
-      zfield.push({ x: r() * W, y: y, s: s, op: (heavy ? 0.75 : 0.55) + r() * 0.35, sd: Math.floor(r() * 9999) });
+      // a real sky is never one cloud: wisps of cirrus above, cumulus below, a storm tower when it storms
+      let type = "cum";
+      if (!heavy && (cov < 45 ? r() < 0.55 : r() < 0.25)) type = "cirrus";
+      if (stormy && i === 1) type = "cb";
+      zfield.push({ x: r() * W, y: y, s: s, op: (heavy ? 0.75 : 0.55) + r() * 0.35, sd: Math.floor(r() * 9999), type: type });
     }
   }
   // cumulus from overlapping circles only: uniform winding, no fill-rule bites
@@ -633,6 +639,51 @@
     ctx.drawImage(spr, cx - (wb / 2 + padX), cy - padTop, wb + padX * 2, padTop + padBot);
     ctx.globalAlpha = 1;
   }
+  function drawCirrus(cx, cy, sc, seed, alpha) {
+    const wpx = Math.round(300 * sc / 8) * 8;
+    const spr = sprite("cir:" + seed + ":" + wpx, wpx, wpx * 0.3, (g2, w2, h2) => {
+      const r = rng(seed + 5);
+      g2.lineCap = "round";
+      for (let i = 0; i < 5; i++) {
+        const yy = h2 * (0.2 + i * 0.15) + (r() - 0.5) * h2 * 0.1;
+        const x0 = w2 * (0.02 + r() * 0.12), x1 = w2 * (0.75 + r() * 0.22);
+        const bow = (r() - 0.5) * h2 * 0.5;
+        const g = g2.createLinearGradient(x0, 0, x1, 0);
+        g.addColorStop(0, "rgba(255,255,255,0)");
+        g.addColorStop(0.25, "rgba(255,255,255," + (0.5 + r() * 0.3).toFixed(2) + ")");
+        g.addColorStop(0.8, "rgba(250,252,255," + (0.3 + r() * 0.2).toFixed(2) + ")");
+        g.addColorStop(1, "rgba(255,255,255,0)");
+        g2.strokeStyle = g;
+        g2.lineWidth = Math.max(1.6, h2 * (0.05 + r() * 0.06));
+        g2.beginPath();
+        g2.moveTo(x0, yy);
+        g2.quadraticCurveTo((x0 + x1) / 2, yy + bow, x1, yy - h2 * 0.08);
+        g2.stroke();
+      }
+    });
+    ctx.globalAlpha = clamp(alpha, 0, 1);
+    ctx.drawImage(spr, cx - wpx / 2, cy - wpx * 0.15);
+    ctx.globalAlpha = 1;
+  }
+  function drawCumulonimbus(cx, cy, sc, seed, alpha, night) {
+    const wb = Math.round(170 * sc / 8) * 8, hb = Math.round(64 * sc / 8) * 8;
+    const spr = sprite("cb:" + seed + ":" + wb + ":" + (night ? 1 : 0), wb * 2.4, hb * 4.6, (g2, w2, h2) => {
+      const cxx = w2 / 2;
+      // anvil crown, tower, and a heavy base — stacked cumuli
+      g2.fillStyle = night ? "rgba(214,220,234,0.9)" : "rgba(250,252,254,0.92)";
+      g2.beginPath(); g2.ellipse(cxx, hb * 0.7, wb * 0.95, hb * 0.42, 0, 0, 6.2832); g2.fill();
+      paintCumulus(g2, cxx - wb * 0.06, hb * 2.1, wb * 0.72, hb * 0.95, seed + 3, night);
+      paintCumulus(g2, cxx, hb * 3.5, wb, hb, seed, night);
+      const g = g2.createLinearGradient(0, hb * 3.1, 0, hb * 4.4);
+      g.addColorStop(0, "rgba(120,132,150,0)");
+      g.addColorStop(1, night ? "rgba(70,82,104,0.55)" : "rgba(126,138,152,0.5)");
+      g2.fillStyle = g;
+      g2.beginPath(); g2.ellipse(cxx, hb * 3.7, wb * 0.9, hb * 0.7, 0, 0, 6.2832); g2.fill();
+    });
+    ctx.globalAlpha = clamp(alpha, 0, 1);
+    ctx.drawImage(spr, cx - spr.width / 2, cy - spr.height * 0.5);
+    ctx.globalAlpha = 1;
+  }
   function camOffset() { return smooth(cam) * H * 1.04; }
   function drawZenith(oy) {
     if (oy <= 0) return;
@@ -654,7 +705,10 @@
       if (cy < -160 || cy > oy + 160) continue;
       const px = c.x + partShift(c.x);
       if (px < -260 * c.s || px > W + 260 * c.s) continue;
-      drawCumulus(px, cy, 150 * c.s, 56 * c.s, 100 + (c.sd % 6), Math.min(1, c.op + 0.25) * smooth(cm * 2) * (1 - clearK * 0.2), night, 0.5);
+      const za = Math.min(1, c.op + 0.25) * smooth(cm * 2) * (1 - clearK * 0.2);
+      if (c.type === "cirrus") drawCirrus(px, cy, c.s, 40 + (c.sd % 5), za * 0.9);
+      else if (c.type === "cb") drawCumulonimbus(px, cy, c.s, 77, za, night);
+      else drawCumulus(px, cy, 150 * c.s, 56 * c.s, 100 + (c.sd % 6), za, night, 0.8);
     }
   }
   function drawSkyHud() {
@@ -775,6 +829,22 @@
   }
 
   function windAmp() { return motionOn() ? clamp(state.weather.wind / 20, 0.2, 1.5) : 0; }
+  function drawBushItem(g2, x, y, h, seed, P) {
+    const r = rng(seed);
+    const c0 = GE.hexA(GE.mixHex(GE.FOL[0], P.fol, P.folK), 0.96);
+    const c1 = GE.hexA(GE.mixHex(GE.FOL[1], P.fol, P.folK), 0.95);
+    const c2 = GE.hexA(GE.mixHex(GE.FOL[2], P.fol, P.folK * 0.8), 0.55);
+    g2.fillStyle = "rgba(34,51,27,0.14)";
+    g2.beginPath(); g2.ellipse(x, y + 2, h * 1.15, h * 0.18, 0, 0, 6.2832); g2.fill();
+    for (const o of [[-0.7, 0.86, c0], [0.72, 0.8, c0], [0, 1.14, c1]]) {
+      g2.fillStyle = o[2];
+      g2.beginPath();
+      g2.ellipse(x + o[0] * h * (0.8 + r() * 0.2), y - h * o[1] * 0.42, h * (0.62 + r() * 0.16), h * o[1] * 0.5, 0, 0, 6.2832);
+      g2.fill();
+    }
+    g2.fillStyle = c2;
+    g2.beginPath(); g2.ellipse(x - h * 0.2, y - h * 0.62, h * 0.5, h * 0.3, -0.3, 0, 6.2832); g2.fill();
+  }
   function glowSprite() {
     return sprite("glow", 16, 16, (g2) => {
       const g = g2.createRadialGradient(8, 8, 0, 8, 8, 7);
@@ -818,6 +888,7 @@
       for (const p of L.lilyPads) GE.pond.drawLilyPad(g2, L.pond, p, t, P);
       GE.pond.drawRipples(g2, L.pond, t, P, L.seed);
     }
+    for (const gr of L.grass) GE.drawGrass(g2, { x: gr.x, base: gr.base, len: gr.len, w: gr.w, ph: gr.ph, lean: gr.lean, t: t, P: P, wind: wind });
     const items = [];
     for (const tr of L.trees) items.push({ y: tr.y, d: () => GE.trees[tr.kind].draw(g2, { x: tr.x, baseY: tr.y, h: tr.h, seed: tr.seed, t: t, P: P, wind: wind }) });
     for (const f of L.flowers) {
@@ -829,9 +900,11 @@
         g2.beginPath(); g2.ellipse(f.x - lw * 0.8, f.y - lw * 0.25, lw, lw * 0.4, -0.7, 0, 6.2832); g2.fill();
         g2.beginPath(); g2.ellipse(f.x + lw * 0.8, f.y - lw * 0.2, lw * 0.9, lw * 0.36, 0.7, 0, 6.2832); g2.fill();
       } });
-      items.push({ y: f.y, d: () => GE.flowers[f.kind].draw(g2, { x: f.x, baseY: f.y, h: f.h, seed: f.seed, t: t, P: P, wind: wind }) });
+      items.push({ y: f.y, d: () => {
+        if (f.kind === "bush") drawBushItem(g2, f.x, f.y, f.h, f.seed, P);
+        else GE.flowers[f.kind].draw(g2, { x: f.x, baseY: f.y, h: f.h, seed: f.seed, t: t, P: P, wind: wind });
+      } });
     }
-    for (const g of L.grass) items.push({ y: g.base, d: () => GE.drawGrass(g2, { x: g.x, base: g.base, len: g.len, w: g.w, ph: g.ph, lean: g.lean, t: t, P: P, wind: wind }) });
     items.sort((a, b) => a.y - b.y);
     for (const it of items) it.d();
     // aerial perspective as one wash: the distance settles back, the foreground stays bright
@@ -1075,7 +1148,7 @@
   function layoutVerse() {
     if (!state.curVerse) return;
     const v = state.curVerse;
-    sky.fs = clamp(Math.round(U * 0.052), 17, 34);
+    sky.fs = clamp(Math.round(U * 0.043), 15, 27);
     sky.lh = Math.round(sky.fs * 1.38);
     const maxW = Math.min(W * 0.84, 640);
     ctx.save();
@@ -1314,7 +1387,7 @@
       const r = await fetch("https://api.rainviewer.com/public/weather-maps.json"); if (!r.ok) return;
       const j = await r.json();
       if (j.radar && j.radar.past && j.radar.past.length) {
-        state.rv = { host: j.host, frames: j.radar.past.slice(-7) };
+        state.rv = { host: j.host, frames: j.radar.past.slice(-19) };   // up to ~3 hours of frames
         updateSat();
       }
     } catch (e) {}
@@ -1349,17 +1422,27 @@
     const yf = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n;
     return { xf: xf, yf: yf, n: n };
   }
+  function fmtLocalTime(unixSec) {
+    // times in HER timezone (the garden's location), friendly 12-hour clock
+    const off = state.sun.off != null ? state.sun.off : -new Date().getTimezoneOffset() * 60;
+    const d = new Date((unixSec + off) * 1000);
+    let hh = d.getUTCHours();
+    const ap = hh >= 12 ? "PM" : "AM";
+    hh = hh % 12 || 12;
+    const mm = d.getUTCMinutes();
+    return hh + ":" + (mm < 10 ? "0" : "") + mm + " " + ap;
+  }
   function updateSat() {
     const grid = el("map-grid"); if (!grid) return;
     const z = 7, m = mercXY(state.loc.lat, state.loc.lon, z);
-    const tx0 = Math.floor(m.xf - 0.5), ty0 = Math.floor(m.yf - 0.5);
+    const txc = Math.floor(m.xf), tyc = Math.floor(m.yf);
     const frames = state.rv && state.rv.frames || [];
     el("sat-scrub").min = -(Math.max(1, frames.length) - 1);
     const idx = frames.length ? clamp(frames.length - 1 + (+el("sat-scrub").value), 0, frames.length - 1) : -1;
     const fr = idx >= 0 ? frames[idx] : null;
     grid.innerHTML = "";
-    for (let gy = 0; gy < 2; gy++) for (let gx = 0; gx < 2; gx++) {
-      const txx = ((tx0 + gx) % m.n + m.n) % m.n, tyy = clamp(ty0 + gy, 0, m.n - 1);
+    for (let gy = 0; gy < 3; gy++) for (let gx = 0; gx < 3; gx++) {
+      const txx = ((txc - 1 + gx) % m.n + m.n) % m.n, tyy = clamp(tyc - 1 + gy, 0, m.n - 1);
       const base = document.createElement("img");
       base.alt = ""; base.loading = "lazy";
       base.src = "https://tile.openstreetmap.org/" + z + "/" + txx + "/" + tyy + ".png";
@@ -1375,11 +1458,25 @@
     }
     grid.classList.toggle("radar-off", el("radar-toggle").textContent.indexOf("off") >= 0);
     const pin = document.querySelector(".map-pin");
-    if (pin) { pin.style.left = ((m.xf - tx0) / 2 * 100) + "%"; pin.style.top = ((m.yf - ty0) / 2 * 100) + "%"; }
-    el("sat-time").textContent = fr ? (Math.max(0, Math.round((Date.now() / 1000 - fr.time) / 60)) + " min ago") : "Radar loading";
+    if (pin) { pin.style.left = ((m.xf - (txc - 1)) / 3 * 100) + "%"; pin.style.top = ((m.yf - (tyc - 1)) / 3 * 100) + "%"; }
+    el("sat-time").textContent = fr
+      ? fmtLocalTime(fr.time) + " \u00b7 " + Math.max(0, Math.round((Date.now() / 1000 - fr.time) / 60)) + " min ago"
+      : "Radar loading";
+    const view = el("map-view");
+    if (view && !view.__centered) {
+      view.__centered = true;
+      requestAnimationFrame(() => {
+        view.scrollLeft = (view.scrollWidth - view.clientWidth) * ((m.xf - (txc - 1)) / 3);
+        view.scrollTop = (view.scrollHeight - view.clientHeight) * ((m.yf - (tyc - 1)) / 3);
+      });
+    }
   }
 
-  function hourLabel(t, i) { return i === 0 ? "Now" : t.slice(11, 16); }
+  function hourLabel(t, i) {
+    if (i === 0) return "Now";
+    const h = +t.slice(11, 13);
+    return (h % 12 || 12) + " " + (h >= 12 ? "PM" : "AM");
+  }
   function renderHours() {
     const h = state.hourly;
     if (!h || !h.t.length) return;
@@ -1522,8 +1619,9 @@
     { k: "birch", t: "tree", n: "Birch" }, { k: "conifer", t: "tree", n: "Pine" },
     { k: "daisy", t: "flower", n: "Daisy" }, { k: "tulip", t: "flower", n: "Tulip" }, { k: "rose", t: "flower", n: "Rose" },
     { k: "lavender", t: "flower", n: "Lavender" }, { k: "foxglove", t: "flower", n: "Foxglove" },
-    { k: "pond", t: "pond", n: "Pond" }
+    { k: "bush", t: "bush", n: "Bush" }, { k: "pond", t: "pond", n: "Pond" }
   ];
+  const PLACE_GROUPS = [["Trees", "tree"], ["Flowers", "flower"], ["Features", "bush", "pond"]];
   let placing = null;
   function placingTheme() {
     if (!placing) return null;
@@ -1531,13 +1629,25 @@
   }
   function buildPlaceBar() {
     const wrap = el("place-kinds"); wrap.innerHTML = "";
-    for (const pk of PLACE_KINDS) {
-      const b = document.createElement("button");
-      b.className = "chip" + (placing && placing.kind === pk.k ? " active" : "");
-      b.textContent = pk.n;
-      b.onclick = () => { placing.kind = pk.k; buildPlaceBar(); };
-      wrap.appendChild(b);
+    for (const grp of PLACE_GROUPS) {
+      const row = document.createElement("div");
+      row.className = "place-group";
+      const lab = document.createElement("span");
+      lab.className = "place-label";
+      lab.textContent = grp[0];
+      row.appendChild(lab);
+      for (const pk of PLACE_KINDS) {
+        if (grp.indexOf(pk.t) < 1) continue;
+        const b = document.createElement("button");
+        b.className = "chip" + (placing && placing.kind === pk.k ? " active" : "");
+        b.textContent = pk.n;
+        b.onclick = () => { placing.kind = pk.k; buildPlaceBar(); };
+        row.appendChild(b);
+      }
+      wrap.appendChild(row);
     }
+    const th = placingTheme();
+    el("place-count").textContent = th && th.placed ? th.placed.length + " / 100" : "";
   }
   function startPlacing(themeId) {
     state.themeId = "custom:" + themeId;
@@ -1567,7 +1677,9 @@
       toast(ny > 0.55 ? "A wide pond, right at her feet" : "A pond, off toward the hills");
     } else {
       th.placed = th.placed || [];
+      if (th.placed.length >= 100) { toast("The garden is full \u2014 one hundred plantings"); return; }
       th.placed.push({ kind: pk.k, t: pk.t, nx: nx, ny: ny, seed: Math.floor(Math.random() * 9999) });
+      el("place-count").textContent = th.placed.length + " / 100";
     }
     persist(); buildScene();
   }
@@ -1860,7 +1972,7 @@
     g.font = "600 9px 'DM Sans', sans-serif";
     g.fillStyle = "#6C7A62";
     g.textAlign = "center";
-    for (let i = 0; i < n; i += 3) g.fillText(i === 0 ? "now" : h.t[i].slice(11, 13), xs(i), chh - 4);
+    for (let i = 0; i < n; i += 3) { const hr = +h.t[i].slice(11, 13); g.fillText(i === 0 ? "now" : (hr % 12 || 12) + (hr >= 12 ? "p" : "a"), xs(i), chh - 4); }
     g.strokeStyle = "rgba(40,60,30,0.12)";
     g.lineWidth = 1;
     g.beginPath(); g.moveTo(padL, wBase); g.lineTo(cw - padR, wBase); g.stroke();
@@ -2085,13 +2197,12 @@
       document.querySelectorAll("#skymode-seg button").forEach(x => x.classList.toggle("on", x === b));
       persist(); initParticles();
     });
-    el("open-hours").onclick = () => { renderHours(); updateSat(); openSheet("hours"); };
+    el("open-hours").onclick = () => { renderHours(); openSheet("hours"); };
+    el("open-radar").onclick = () => { renderHours(); updateSat(); openSheet("radar"); };
     document.querySelectorAll("#hours-tabs button").forEach(b => b.onclick = () => {
       document.querySelectorAll("#hours-tabs button").forEach(x => x.classList.toggle("on", x === b));
       el("hours-rain").style.display = b.dataset.t === "rain" ? "" : "none";
       el("hours-wind").style.display = b.dataset.t === "wind" ? "" : "none";
-      el("hours-sky").style.display = b.dataset.t === "sky" ? "" : "none";
-      if (b.dataset.t === "sky") updateSat();
     });
     el("sat-scrub").oninput = updateSat;
     el("radar-toggle").onclick = () => {
@@ -2188,6 +2299,7 @@
       const x = e.clientX, y = e.clientY;
       tapTimer = setTimeout(() => {
         tapTimer = null;
+        if (y < 40 && Math.abs(x - W / 2) < 46 && cam < 0.3) { camTarget = 1; camVel = 0; return; }
         if (camTarget > 0.5 || cam > 0.5) { camTarget = 0; camVel = 0; return; }
         if (state.sail.on && boatHit && Math.abs(x + panX - boatHit.x) < U * 0.2 && Math.abs(y - boatHit.y) < U * 0.2) {
           renderRoute(); renderTrip(); renderFavs(); openSheet("route");

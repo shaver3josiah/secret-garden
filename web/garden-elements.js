@@ -358,15 +358,17 @@
   flowers.daisy = { footprint: 0.13, draw: function (ctx, o) {
     var r = rng(o.seed), P = o.P, h = o.h, x = o.x, y = o.baseY, wind = o.wind == null ? 1 : o.wind;
     var sway = Math.sin(o.t * 1.2 + o.seed * 2) * h * 0.045 * wind;
-    var tx = x + (r() - 0.5) * h * 0.1 + sway, ty = y - h;
-    stem(ctx, x, y, tx, ty, P, Math.max(1, h * 0.025));
-    var br = h * 0.14;
+    // app patch: cuter, smaller daisy — shorter stem, rounder petals, bigger heart
+    var hh = h * 0.78;
+    var tx = x + (r() - 0.5) * hh * 0.1 + sway, ty = y - hh;
+    stem(ctx, x, y, tx, ty, P, Math.max(1, hh * 0.025));
+    var br = hh * 0.125;
     ctx.fillStyle = B('#FBF7EC', P);
-    for (var p = 0; p < 9; p++) {
-      var a = p / 9 * TAU + o.seed;
-      E(ctx, tx + Math.cos(a) * br, ty + Math.sin(a) * br, br * 0.62, br * 0.3, a); ctx.fill();
+    for (var p = 0; p < 8; p++) {
+      var a = p / 8 * TAU + o.seed;
+      E(ctx, tx + Math.cos(a) * br, ty + Math.sin(a) * br, br * 0.58, br * 0.42, a); ctx.fill();
     }
-    ctx.fillStyle = B('#F0D493', P); E(ctx, tx, ty, br * 0.42, br * 0.42); ctx.fill();
+    ctx.fillStyle = B('#F0D493', P); E(ctx, tx, ty, br * 0.5, br * 0.5); ctx.fill();
     ctx.strokeStyle = hexA('#9A7636', 0.6); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(tx, ty, br * 0.42, 0.3, 2.2); ctx.stroke();
   }};
@@ -421,10 +423,11 @@
       E(ctx, x + (i - 1) * h * 0.2 + (r() - 0.5) * h * 0.1, y - h * 0.2 - (i === 1 ? h * 0.1 : 0), h * (0.24 + r() * 0.08), h * (0.17 + r() * 0.05)); ctx.fill();
     }
     var col = B('#E88AA0', P), dark = mixHex(col, '#22331B', 0.35);
+    // app patch: roses sit ON the bush, gathered low over the foliage blobs
     for (i = 0; i < 3; i++) {
-      var sway = Math.sin(o.t * 1.0 + o.seed + i * 2) * h * 0.015 * wind;
-      var hx0 = x + (i - 1) * h * 0.22 + (r() - 0.5) * h * 0.08 + sway;
-      var hy0 = y - h * (0.38 + r() * 0.16) - (i === 1 ? h * 0.08 : 0);
+      var sway = Math.sin(o.t * 1.0 + o.seed + i * 2) * h * 0.01 * wind;
+      var hx0 = x + (i - 1) * h * 0.19 + (r() - 0.5) * h * 0.05 + sway;
+      var hy0 = y - h * (0.26 + r() * 0.1) - (i === 1 ? h * 0.09 : 0);
       var rr = h * (0.055 + r() * 0.02);
       ctx.fillStyle = col; E(ctx, hx0, hy0, rr, rr * 0.9); ctx.fill();
       ctx.strokeStyle = dark; ctx.lineWidth = Math.max(0.8, h * 0.012);
@@ -432,11 +435,10 @@
       ctx.beginPath(); ctx.arc(hx0, hy0, rr * 0.36, 2 + i, 2 + i + 4.6); ctx.stroke();
       ctx.fillStyle = dark; E(ctx, hx0, hy0, rr * 0.12, rr * 0.12); ctx.fill();
     }
-    // a bud
-    var bx = x + h * 0.3, by = y - h * 0.5;
-    ctx.strokeStyle = F(FOL[0], P); ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(x + h * 0.22, y - h * 0.28); ctx.lineTo(bx, by); ctx.stroke();
-    ctx.fillStyle = mixHex(col, '#FBF7EC', 0.2); petal(ctx, bx, by, h * 0.022, h * 0.06, 0.3);
+    // app patch: two nestled buds instead of a bare stick
+    ctx.fillStyle = mixHex(col, '#FBF7EC', 0.25);
+    E(ctx, x + h * 0.3, y - h * 0.3, h * 0.028, h * 0.038, 0.3); ctx.fill();
+    E(ctx, x - h * 0.32, y - h * 0.24, h * 0.024, h * 0.034, -0.3); ctx.fill();
   }};
 
   // ---------- grass ----------
