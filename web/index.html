@@ -148,12 +148,24 @@
     <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
   </div>
   <div class="field">
+    <div class="seg" id="hours-loc">
+      <button data-l="0" class="on" id="hloc-0">Her town</button>
+      <button data-l="1" id="hloc-1">+ Add a place</button>
+    </div>
+    <div class="addstop" id="loc2-row" style="display:none">
+      <input type="text" id="loc2-input" class="text-input" placeholder="Another town to watch" maxlength="60">
+      <button class="btn" id="loc2-go">Set</button>
+    </div>
+  </div>
+  <div class="field">
     <div class="seg" id="hours-tabs">
       <button data-t="rain" class="on">Rain</button>
+      <button data-t="temp">Temp</button>
       <button data-t="wind">Wind</button>
     </div>
   </div>
   <div class="hours-panel" id="hours-rain"></div>
+  <div class="hours-panel" id="hours-temp" style="display:none"></div>
   <div class="hours-panel" id="hours-wind" style="display:none"></div>
 </section>
 

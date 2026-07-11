@@ -961,3 +961,6 @@ body.starfield #const-note { color: var(--honey-light); }
 }
 
 .stage, .drawer, .placebar { user-select: none; -webkit-user-select: none; }
+
+
+.hbar.temp i { background: linear-gradient(90deg, var(--honey-light), var(--honey)); }

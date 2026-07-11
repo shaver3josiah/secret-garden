@@ -37,6 +37,8 @@
     aqi: store.aqi != null ? store.aqi : null,
     trip: Object.assign({ from: "Norwich, NY", to: "Kingston, NY", plan: null }, store.trip || {}),
     favs: store.favs || [],
+    loc2: store.loc2 || null,
+    hourly2: store.hourly2 || null,
     rv: null,
     curVerse: null,
     versePaused: false,
@@ -55,7 +57,7 @@
   }
 
   function persist() {
-    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, sun: state.sun, aqi: state.aqi, trip: state.trip, favs: state.favs });
+    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, sun: state.sun, aqi: state.aqi, trip: state.trip, favs: state.favs, loc2: state.loc2, hourly2: state.hourly2 });
   }
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -1364,7 +1366,7 @@
   async function fetchWeather() {
     try {
       const { lat, lon } = state.loc;
-      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&current=temperature_2m,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,is_day,precipitation&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m&daily=sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=2";
+      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&current=temperature_2m,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,is_day,precipitation&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m&daily=sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=2";
       const r = await fetch(url); if (!r.ok) throw 0;
       const j = await r.json(), c = j.current;
       state.weather = { code: c.weather_code, temp: Math.round(c.temperature_2m), cloud: c.cloud_cover, wind: c.wind_speed_10m, windDir: c.wind_direction_10m, isDay: c.is_day, precip: c.precipitation };
@@ -1374,10 +1376,25 @@
         let i0 = hh.time.indexOf(c.time.slice(0, 13) + ":00");
         if (i0 < 0) i0 = 0;
         const take = (arr) => arr.slice(i0, i0 + 24);
-        state.hourly = { t: take(hh.time), tp: take(hh.temperature_2m), pp: take(hh.precipitation_probability), pr: take(hh.precipitation), code: take(hh.weather_code), cc: take(hh.cloud_cover), ws: take(hh.wind_speed_10m), wd: take(hh.wind_direction_10m), wg: take(hh.wind_gusts_10m) };
+        state.hourly = { t: take(hh.time), tp: take(hh.temperature_2m), at: take(hh.apparent_temperature), pp: take(hh.precipitation_probability), pr: take(hh.precipitation), code: take(hh.weather_code), cc: take(hh.cloud_cover), ws: take(hh.wind_speed_10m), wd: take(hh.wind_direction_10m), wg: take(hh.wind_gusts_10m) };
       }
       persist(); updateConditions(); initParticles(); renderHours();
+      if (state.loc2) fetchHourly2();
     } catch (e) { updateConditions(); }
+  }
+  async function fetchHourly2() {
+    if (!state.loc2) return;
+    try {
+      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + state.loc2.lat + "&longitude=" + state.loc2.lon + "&current=temperature_2m&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=2";
+      const r = await fetch(url); if (!r.ok) return;
+      const j = await r.json(), hh = j.hourly;
+      if (!hh || !hh.time) return;
+      let i0 = j.current && j.current.time ? hh.time.indexOf(j.current.time.slice(0, 13) + ":00") : 0;
+      if (i0 < 0) i0 = 0;
+      const take = (arr) => arr.slice(i0, i0 + 24);
+      state.hourly2 = { t: take(hh.time), tp: take(hh.temperature_2m), at: take(hh.apparent_temperature), pp: take(hh.precipitation_probability), pr: take(hh.precipitation), code: take(hh.weather_code), cc: take(hh.cloud_cover), ws: take(hh.wind_speed_10m), wd: take(hh.wind_direction_10m), wg: take(hh.wind_gusts_10m) };
+      persist(); renderHours();
+    } catch (e) {}
   }
   async function fetchAqi() {
     try {
@@ -1503,21 +1520,37 @@
     const h = +t.slice(11, 13);
     return (h % 12 || 12) + " " + (h >= 12 ? "PM" : "AM");
   }
+  let hoursView = 0;   // 0 = her town, 1 = the second place
   function renderHours() {
-    const h = state.hourly;
-    if (!h || !h.t.length) return;
-    const rainEl = el("hours-rain"), windEl = el("hours-wind"), cloudEl = el("hours-cloud");
-    let rh = "", wh = "", ch = "";
+    if (hoursView === 1 && !state.loc2) hoursView = 0;
+    const h = hoursView === 1 ? state.hourly2 : state.hourly;
+    const lb = el("hloc-1");
+    if (lb) lb.textContent = state.loc2 ? state.loc2.place.split(",")[0] : "+ Add a place";
+    document.querySelectorAll("#hours-loc button").forEach(b => b.classList.toggle("on", +b.dataset.l === hoursView));
+    const l2row = el("loc2-row");
+    if (l2row) l2row.style.display = hoursView === 1 || (!state.loc2 && hoursView === 0) ? (hoursView === 1 ? "" : "none") : "none";
+    if (!h || !h.t.length) {
+      if (hoursView === 1) el("hours-temp").innerHTML = el("hours-rain").innerHTML = el("hours-wind").innerHTML = "<p class='empty-note'>Fetching the sky over " + state.loc2.place.split(",")[0] + "...</p>";
+      return;
+    }
+    const rainEl = el("hours-rain"), windEl = el("hours-wind"), tempEl = el("hours-temp"), cloudEl = el("hours-cloud");
+    let rh = "", wh = "", th = "", ch = "";
     const n = Math.min(12, h.t.length);
+    let tMin = 999, tMax = -999;
+    for (let i = 0; i < n; i++) { if (h.tp[i] < tMin) tMin = h.tp[i]; if (h.tp[i] > tMax) tMax = h.tp[i]; }
+    if (tMax - tMin < 6) { tMax += 3; tMin -= 3; }
     for (let i = 0; i < n; i++) {
       rh += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar'><i style='width:" + clamp(h.pp[i], 2, 100) + "%'></i></span><span class='hval'>" + h.pp[i] + "% <small>" + (+h.pr[i]).toFixed(2) + " in</small></span></div>";
       wh += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar wind'><i style='width:" + clamp(h.ws[i] / 32 * 100, 3, 100) + "%'></i></span><span class='hval'><span class='harrow' style='transform:rotate(" + ((h.wd[i] + 180) % 360) + "deg)'>&#8593;</span> " + Math.round(h.ws[i]) + " <small>g " + Math.round(h.wg[i]) + " mph</small></span></div>";
+      const fl = h.at && h.at[i] != null ? Math.round(h.at[i]) : null;
+      th += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar temp'><i style='width:" + clamp((h.tp[i] - tMin) / (tMax - tMin) * 100, 4, 100) + "%'></i></span><span class='hval'>" + Math.round(h.tp[i]) + "&deg; air" + (fl != null ? " <small>feels " + fl + "&deg;</small>" : "") + "</span></div>";
     }
     for (let i = 0; i < Math.min(8, h.t.length); i++) {
-      ch += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar cloud'><i style='width:" + clamp(h.cc[i], 2, 100) + "%'></i></span><span class='hval'>" + h.cc[i] + "% <small>" + Math.round(h.tp[i]) + "°</small></span></div>";
+      ch += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar cloud'><i style='width:" + clamp(h.cc[i], 2, 100) + "%'></i></span><span class='hval'>" + h.cc[i] + "% <small>" + Math.round(h.tp[i]) + "&deg;</small></span></div>";
     }
     rainEl.innerHTML = rh;
     windEl.innerHTML = wh;
+    if (tempEl) tempEl.innerHTML = th;
     cloudEl.innerHTML = ch;
     updateHoursBar();
   }
@@ -2265,11 +2298,32 @@
       persist(); initParticles();
     });
     el("open-hours").onclick = () => { renderHours(); openSheet("hours"); };
+    document.querySelectorAll("#hours-loc button").forEach(b => b.onclick = () => {
+      const v = +b.dataset.l;
+      if (v === 1 && !state.loc2) { el("loc2-row").style.display = ""; el("loc2-input").focus(); return; }
+      hoursView = v;
+      renderHours();
+    });
+    const setLoc2 = async () => {
+      const q = (el("loc2-input").value || "").trim(); if (!q) return;
+      toast("Searching");
+      const g = await geocode(q);
+      if (!g) { toast("Place not found"); return; }
+      state.loc2 = g;
+      el("loc2-input").value = "";
+      hoursView = 1;
+      persist(); renderHours();
+      await fetchHourly2();
+      toast("Watching the sky over " + g.place.split(",")[0]);
+    };
+    el("loc2-go").onclick = setLoc2;
+    el("loc2-input").addEventListener("keydown", e => { if (e.key === "Enter") setLoc2(); });
     el("open-radar").onclick = () => { renderHours(); const v = el("map-view"); if (v) v.__centered = false; updateSat(); openSheet("radar"); };
     document.querySelectorAll("#hours-tabs button").forEach(b => b.onclick = () => {
       document.querySelectorAll("#hours-tabs button").forEach(x => x.classList.toggle("on", x === b));
       el("hours-rain").style.display = b.dataset.t === "rain" ? "" : "none";
       el("hours-wind").style.display = b.dataset.t === "wind" ? "" : "none";
+      el("hours-temp").style.display = b.dataset.t === "temp" ? "" : "none";
     });
     el("sat-scrub").oninput = updateSat;
     el("radar-toggle").onclick = () => {
