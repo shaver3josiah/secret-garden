@@ -74,6 +74,15 @@
   </div>
 </div>
 
+<div class="placebar" id="placebar" style="display:none">
+  <div class="place-kinds" id="place-kinds"></div>
+  <div class="place-actions">
+    <button class="chip" id="place-undo">Undo</button>
+    <button class="chip" id="place-clear">Clear</button>
+    <button class="chip gold-chip" id="place-done">Done</button>
+  </div>
+</div>
+
 <div class="sheet-backdrop" id="sheet-backdrop"></div>
 
 <section class="sheet" id="sheet-creator" role="dialog" aria-label="Create a garden">
@@ -114,12 +123,20 @@
     </div>
   </div>
   <div class="field">
+    <label>Start from</label>
+    <div class="seg" id="slate-seg">
+      <button data-v="template" class="on">A planted garden</button>
+      <button data-v="blank">A blank meadow</button>
+    </div>
+  </div>
+  <div class="field">
     <label>Name</label>
     <input type="text" id="theme-name" class="text-input" placeholder="My Garden" maxlength="28">
   </div>
   <div class="row-actions">
     <button class="btn sheet-close">Cancel</button>
-    <button class="btn primary" id="save-theme">Save garden</button>
+    <button class="btn" id="save-theme">Save</button>
+    <button class="btn primary" id="design-theme">Save &amp; place plants</button>
   </div>
 </section>
 

@@ -254,7 +254,26 @@
     for (const f of L.flowers) f.x -= shift;
     for (const g2 of L.grass) g2.x -= shift;
     if (L.pond) L.pond.cx -= shift;
-    if (L.trees.length && !L.trees.some(t => t.kind === "willow")) L.trees[0].kind = "willow";
+    const designed = th.slate === "blank" || (th.placed && th.placed.length) || th.pondAt;
+    if (designed) {
+      const G = H - horizonY;
+      if (th.slate === "blank") { L.trees = []; L.flowers = []; L.pond = null; L.lilyPads = []; L.koi = []; }
+      if (th.pondAt) {
+        const d = th.pondAt.ny;
+        const rx = Math.min(W * (0.1 + 0.24 * d), 230);
+        L.pond = { cx: (-0.35 + th.pondAt.nx * 1.7) * W, cy: horizonY + d * G, rx: rx, ry: Math.min(rx * 0.42, G * 0.16) };
+        L.lilyPads = GE.pond.makeLilyPads(L.pond, 7, 4 + Math.round(d * 6));
+        L.koi = GE.pond.makeKoi(7, 3);
+      }
+      if (th.placed) for (const p of th.placed) {
+        const px = (-0.35 + p.nx * 1.7) * W, py = horizonY + p.ny * G;
+        const sc = 0.42 + 0.78 * p.ny;
+        if (p.t === "tree") L.trees.push({ kind: p.kind, x: px, y: py, h: G * 0.95 * sc, seed: p.seed });
+        else L.flowers.push({ kind: p.kind, x: px, y: py, h: G * 0.26 * sc, seed: p.seed });
+      }
+    } else if (L.trees.length && !L.trees.some(t => t.kind === "willow")) {
+      L.trees[0].kind = "willow";
+    }
     L.willow = L.trees.find(t => t.kind === "willow") || null;
     // flatten the pond into a perspective ellipse (library default is near-circular on narrow screens)
     if (L.pond) {
@@ -281,7 +300,8 @@
     return "clear";
   }
   function initParticles() {
-    const scale = clamp(W / 1100, 0.4, 1.2), k = wxKind(), th = activeTheme();
+    const calm = state.settings.skyMode === "cycle";   // day cycle: nice weather, always
+    const scale = clamp(W / 1100, 0.4, 1.2), k = calm ? "clear" : wxKind(), th = activeTheme();
     const heavy = motionOn() ? 1 : 0.25;
     rain = []; snow = []; petals = []; pollen = []; flies = []; clouds = [];
     const cloudN = clamp(Math.round(2 + state.weather.cloud / 16), 2, 9);
@@ -289,6 +309,14 @@
     buildZenithField();
     if (k === "rain") { const n = Math.round((state.weather.code >= 80 || state.weather.code >= 63 ? 240 : 150) * scale * heavy); for (let i = 0; i < n; i++) rain.push({ x: Math.random() * W, y: Math.random() * H, len: 9 + Math.random() * 14, sp: 7 + Math.random() * 6 }); }
     if (k === "snow") { const n = Math.round(130 * scale * heavy); for (let i = 0; i < n; i++) snow.push({ x: Math.random() * W, y: Math.random() * H, r: 1 + Math.random() * 2.4, sp: 0.6 + Math.random() * 1.1, ph: Math.random() * 6.28 }); }
+    if (!calm && k === "clear") {
+      // a chance of rain becomes a chance of raindrops: sparse above 30%, +12 drops per 10 points
+      const pp = state.hourly && state.hourly.pp && state.hourly.pp.length ? state.hourly.pp[0] : 0;
+      if (pp > 30) {
+        const n = Math.round(((pp - 30) / 10) * 12 * scale * heavy);
+        for (let i = 0; i < n; i++) rain.push({ x: Math.random() * W, y: Math.random() * H, len: 7 + Math.random() * 9, sp: 6 + Math.random() * 5 });
+      }
+    }
     if (th.ambient === "petals") { const n = Math.round(20 * scale * heavy); for (let i = 0; i < n; i++) petals.push({ x: Math.random() * W, y: Math.random() * H, r: 3 + Math.random() * 4, sp: 0.5 + Math.random() * 0.9, drift: (Math.random() - 0.5) * 0.6, rot: Math.random() * 6.28, rs: (Math.random() - 0.5) * 0.05, col: th.bloom[Math.floor(Math.random() * th.bloom.length)] }); }
     if (th.ambient === "pollen") { const n = Math.round(34 * scale * heavy); for (let i = 0; i < n; i++) pollen.push({ x: Math.random() * W, y: horizonY + Math.random() * (H - horizonY), r: 1 + Math.random() * 2, ph: Math.random() * 6.28, sp: 0.2 + Math.random() * 0.35 }); }
     if (th.ambient === "fireflies") { const n = Math.round(24 * scale * heavy); for (let i = 0; i < n; i++) flies.push({ x: Math.random() * W, y: horizonY * 0.7 + Math.random() * (H - horizonY * 0.7), ph: Math.random() * 6.28, dx: (Math.random() - 0.5) * 0.3, dy: (Math.random() - 0.5) * 0.3 }); }
@@ -323,8 +351,8 @@
 
   function drawGround() {
     const alt = sunAltitude();
-    const groundNear = mix(hexToRgb("#3b4a2c"), hexToRgb("#7a935f"), smooth(alt / 0.3));
-    const groundFar = mix(hexToRgb("#6f8a55"), hexToRgb("#c3d5b0"), smooth(alt / 0.3));
+    const groundNear = mix(hexToRgb("#36442a"), hexToRgb("#70895a"), smooth(alt / 0.3));
+    const groundFar = mix(hexToRgb("#647d4b"), hexToRgb("#b2c79e"), smooth(alt / 0.3));
     const gg = ctx.createLinearGradient(0, horizonY, 0, H);
     gg.addColorStop(0, rgb(groundFar));
     gg.addColorStop(1, rgb(groundNear));
@@ -377,6 +405,40 @@
   }
 
   function celestialX(frac) { return W * (0.14 + 0.72 * frac); }
+
+  function sunScreenPos() {
+    const df = dayFrac();
+    return {
+      x: celestialX(df),
+      y: horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8 - H * 0.125 * smooth(Math.sin(Math.PI * df) * 2),
+      a: clamp(sunAltitude() / 0.12, 0, 1)
+    };
+  }
+  function drawRays() {
+    const cov = state.weather.cloud, sp = sunScreenPos();
+    if (sp.a < 0.25 || cov < 25 || cov > 88) return;
+    const k = clamp(1 - Math.abs(cov - 56) / 34, 0.2, 1);   // strongest at broken cover
+    const base = 0.1 * sp.a * k * (1 - smooth(cam * 1.4));
+    if (base < 0.01) return;
+    ctx.save();
+    ctx.translate(sp.x, sp.y);
+    const rot = motionOn() ? Math.sin(T * 0.00006) * 0.15 : 0;
+    for (let i = 0; i < 7; i++) {
+      const a = (-0.5 + i / 6) * 1.5 + Math.PI / 2 + rot;
+      const len = H * (0.45 + (i % 3) * 0.12);
+      const wHalf = 14 + (i % 2) * 10;
+      const g = ctx.createLinearGradient(0, 0, Math.cos(a) * len, Math.sin(a) * len);
+      g.addColorStop(0, "rgba(255,240,200," + (base * (0.8 + (i % 2) * 0.2)).toFixed(3) + ")");
+      g.addColorStop(1, "rgba(255,240,200,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(a) * len - Math.sin(a) * wHalf, Math.sin(a) * len + Math.cos(a) * wHalf);
+      ctx.lineTo(Math.cos(a) * len + Math.sin(a) * wHalf, Math.sin(a) * len - Math.cos(a) * wHalf);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
 
   function drawCelestial() {
     const alt = sunAltitude();
@@ -695,7 +757,13 @@
     }
     for (const g of L.grass) items.push({ y: g.base, d: () => GE.drawGrass(g2, { x: g.x, base: g.base, len: g.len, w: g.w, ph: g.ph, lean: g.lean, t: t, P: P, wind: wind }) });
     items.sort((a, b) => a.y - b.y);
-    for (const it of items) it.d();
+    const G = H - horizonY;
+    for (const it of items) {
+      const depth = clamp((it.y - horizonY) / G, 0, 1);
+      g2.filter = "brightness(" + (0.88 + 0.18 * depth).toFixed(3) + ") saturate(" + (0.8 + 0.3 * depth).toFixed(3) + ")";
+      it.d();
+    }
+    g2.filter = "none";
   }
 
   // robin and nest live in the willow: fly in, feed the chicks, keep watch, fly off (40s loop)
@@ -903,7 +971,7 @@
       g.addColorStop(1, "rgba(214,220,216," + haze + ")");
       ctx.fillStyle = g; ctx.fillRect(-W * 0.4, horizonY - H * 0.2, W * 1.8, H - horizonY + H * 0.2);
     }
-    if (state.weather.code >= 95 && motionOn()) {
+    if (state.weather.code >= 95 && motionOn() && state.settings.skyMode !== "cycle") {
       if (Math.random() < 0.004) flashT = 1;
       if (flashT > 0) { ctx.fillStyle = "rgba(255,255,255," + (flashT * 0.35) + ")"; ctx.fillRect(0, 0, W, horizonY); flashT -= 0.08; }
     }
@@ -1010,6 +1078,7 @@
     ctx.translate(-panX, oy);
     drawSky();
     drawStars();
+    drawRays();
     drawClouds();
     drawCelestial();
     if (state.sail.on) {
@@ -1269,6 +1338,15 @@
       mark.innerHTML = t.id === state.themeId ? "<svg width='16' height='16' viewBox='0 0 16 16' fill='none'><path d='M2.5 8.5l3.4 3.4L13.5 4.3' stroke='currentColor' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/></svg>" : "";
       row.appendChild(dot); row.appendChild(name); row.appendChild(mark);
       row.onclick = () => { setTheme(t.id); closeSheet(); toast(t.name); };
+      if (t.id.indexOf("custom:") === 0) {
+        const pencil = document.createElement("span");
+        pencil.className = "scene-design";
+        pencil.setAttribute("role", "button");
+        pencil.setAttribute("aria-label", "Place plants in " + t.name);
+        pencil.innerHTML = "<svg width='17' height='17' viewBox='0 0 17 17' fill='none'><path d='M2.5 14.5l1-3.6 8-8a1.6 1.6 0 0 1 2.3 0l.3.3a1.6 1.6 0 0 1 0 2.3l-8 8-3.6 1Z' stroke='currentColor' stroke-width='1.5' stroke-linejoin='round'/></svg>";
+        pencil.onclick = (ev) => { ev.stopPropagation(); startPlacing(t.id.slice(7)); };
+        row.appendChild(pencil);
+      }
       wrap.appendChild(row);
     }
     const add = document.createElement("button");
@@ -1279,7 +1357,7 @@
   }
   function setTheme(id) { state.themeId = id; persist(); buildThemeChips(); buildScene(); }
 
-  const CREATOR = { foliage: 1, bloom: 0, density: 0.7, ambient: "petals", water: true, warmBias: 0 };
+  const CREATOR = { foliage: 1, bloom: 0, density: 0.7, ambient: "petals", water: true, warmBias: 0, slate: "template" };
   const FOLIAGE_SETS = [["#2F5233", "#4E8C4A", "#8FBE86"], ["#3A5A2A", "#6D9A3E", "#A9C46E"], ["#2C4A3C", "#4E7E6A", "#8FB6A2"], ["#4A6B2E", "#7DA43C", "#B7CE77"], ["#4B5D2E", "#87A24E", "#C2CE8E"]];
   const BLOOM_SETS = [["#E7A9C0", "#F2C36B", "#EBC7DA"], ["#E88AA0", "#EAB94C", "#D98AB0"], ["#F2C14E", "#E8899B", "#B79CD8"], ["#CBD6E6", "#DCE4EC", "#B8C9D8"], ["#D8B26A", "#E6D3A0"]];
   function paintSwatches(container, sets, key) {
@@ -1294,7 +1372,7 @@
   }
   function previewCreator() {
     state.themeId = "__preview__";
-    THEMES["__preview__"] = { name: "Preview", foliage: FOLIAGE_SETS[CREATOR.foliage], bloom: BLOOM_SETS[CREATOR.bloom], ambient: CREATOR.ambient, water: CREATOR.water, density: CREATOR.density, warmBias: CREATOR.warmBias };
+    THEMES["__preview__"] = { name: "Preview", foliage: FOLIAGE_SETS[CREATOR.foliage], bloom: BLOOM_SETS[CREATOR.bloom], ambient: CREATOR.ambient, water: CREATOR.water && CREATOR.slate !== "blank", density: CREATOR.density, warmBias: CREATOR.warmBias, slate: CREATOR.slate };
     buildScene();
   }
   function openCreator() {
@@ -1305,18 +1383,21 @@
     document.querySelectorAll("#ambient-seg button").forEach(b => b.classList.toggle("on", b.dataset.v === CREATOR.ambient));
     document.querySelectorAll("#water-seg button").forEach(b => b.classList.toggle("on", (b.dataset.v === "on") === CREATOR.water));
     el("theme-name").value = "";
+    CREATOR.slate = "template";
+    document.querySelectorAll("#slate-seg button").forEach(x => x.classList.toggle("on", x.dataset.v === "template"));
     openSheet("creator");
     previewCreator();
   }
   function saveCreator() {
     const name = (el("theme-name").value || "").trim() || "My Garden";
     const id = "c" + Date.now().toString(36);
-    const th = { id: id, name: name, foliage: FOLIAGE_SETS[CREATOR.foliage], bloom: BLOOM_SETS[CREATOR.bloom], ambient: CREATOR.ambient, water: CREATOR.water, density: CREATOR.density, warmBias: CREATOR.warmBias };
+    const th = { id: id, name: name, foliage: FOLIAGE_SETS[CREATOR.foliage], bloom: BLOOM_SETS[CREATOR.bloom], ambient: CREATOR.ambient, water: CREATOR.water && CREATOR.slate !== "blank", density: CREATOR.density, warmBias: CREATOR.warmBias, slate: CREATOR.slate, placed: [], pondAt: null };
     state.custom.push(th);
     state.themeId = "custom:" + id;
     delete THEMES["__preview__"];
     persist(); buildThemeChips(); buildScene();
     closeSheet(); toast("Saved " + name);
+    return id;
   }
 
   const TOUR = [
@@ -1344,6 +1425,62 @@
     });
   }
   function openTour() { tourIdx = 0; renderTour(); openSheet("tour"); }
+
+  // ---------- garden designer: tap to plant ----------
+  const PLACE_KINDS = [
+    { k: "willow", t: "tree", n: "Willow" }, { k: "cherry", t: "tree", n: "Cherry" }, { k: "oak", t: "tree", n: "Oak" },
+    { k: "birch", t: "tree", n: "Birch" }, { k: "conifer", t: "tree", n: "Pine" },
+    { k: "daisy", t: "flower", n: "Daisy" }, { k: "tulip", t: "flower", n: "Tulip" }, { k: "rose", t: "flower", n: "Rose" },
+    { k: "lavender", t: "flower", n: "Lavender" }, { k: "foxglove", t: "flower", n: "Foxglove" },
+    { k: "pond", t: "pond", n: "Pond" }
+  ];
+  let placing = null;
+  function placingTheme() {
+    if (!placing) return null;
+    return state.custom.find(c => c.id === placing.themeId) || null;
+  }
+  function buildPlaceBar() {
+    const wrap = el("place-kinds"); wrap.innerHTML = "";
+    for (const pk of PLACE_KINDS) {
+      const b = document.createElement("button");
+      b.className = "chip" + (placing && placing.kind === pk.k ? " active" : "");
+      b.textContent = pk.n;
+      b.onclick = () => { placing.kind = pk.k; buildPlaceBar(); };
+      wrap.appendChild(b);
+    }
+  }
+  function startPlacing(themeId) {
+    state.themeId = "custom:" + themeId;
+    persist(); buildThemeChips(); buildScene();
+    placing = { themeId: themeId, kind: "daisy" };
+    buildPlaceBar();
+    el("placebar").style.display = "";
+    el("drawer").classList.add("closed");
+    closeSheet();
+    toast("Tap the garden to plant. Higher up sits farther away.");
+  }
+  function stopPlacing() {
+    placing = null;
+    el("placebar").style.display = "none";
+    el("drawer").classList.remove("closed");
+    persist();
+    toast("Her garden, kept");
+  }
+  function placeAt(x, y) {
+    const th = placingTheme(); if (!th) return;
+    if (y < horizonY + 4 || y > H - 8) { toast("Plant on the ground, below the hills"); return; }
+    const nx = clamp(((x + panX) / W + 0.35) / 1.7, 0, 1);
+    const ny = clamp((y - horizonY) / (H - horizonY), 0.02, 1);
+    const pk = PLACE_KINDS.find(p => p.k === placing.kind);
+    if (pk.t === "pond") {
+      th.pondAt = { nx: nx, ny: ny };
+      toast(ny > 0.55 ? "A wide pond, right at her feet" : "A pond, off toward the hills");
+    } else {
+      th.placed = th.placed || [];
+      th.placed.push({ kind: pk.k, t: pk.t, nx: nx, ny: ny, seed: Math.floor(Math.random() * 9999) });
+    }
+    persist(); buildScene();
+  }
 
   function openSheet(which) {
     el("sheet-" + which).classList.add("open");
@@ -1809,6 +1946,25 @@
     el("sheet-backdrop").onclick = closeSheet;
     document.querySelectorAll(".sheet-close").forEach(b => b.onclick = closeSheet);
     el("save-theme").onclick = saveCreator;
+    el("design-theme").onclick = () => { const id = saveCreator(); startPlacing(id); };
+    document.querySelectorAll("#slate-seg button").forEach(b => b.onclick = () => {
+      CREATOR.slate = b.dataset.v;
+      document.querySelectorAll("#slate-seg button").forEach(x => x.classList.toggle("on", x === b));
+      previewCreator();
+    });
+    el("place-done").onclick = stopPlacing;
+    el("place-undo").onclick = () => {
+      const th = placingTheme(); if (!th) return;
+      if (th.placed && th.placed.length) th.placed.pop();
+      else th.pondAt = null;
+      persist(); buildScene();
+    };
+    el("place-clear").onclick = () => {
+      const th = placingTheme(); if (!th) return;
+      th.placed = []; th.pondAt = null;
+      persist(); buildScene();
+      toast("A fresh start");
+    };
     el("density-range").oninput = e => { CREATOR.density = +e.target.value / 100; previewCreator(); };
     el("warm-range").oninput = e => { CREATOR.warmBias = +e.target.value / 50 - 1; previewCreator(); };
     document.querySelectorAll("#ambient-seg button").forEach(b => b.onclick = () => { CREATOR.ambient = b.dataset.v; document.querySelectorAll("#ambient-seg button").forEach(x => x.classList.toggle("on", x === b)); previewCreator(); });
@@ -1923,6 +2079,7 @@
         }
         return;
       }
+      if (placing) { placeAt(e.clientX, e.clientY); return; }
       const now = Date.now();
       if (now - lastTap < 320) {
         lastTap = 0;

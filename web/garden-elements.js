@@ -329,7 +329,8 @@
     ctx.closePath(); ctx.fill(); ctx.restore();
   }
   function stem(ctx, x, base, tipX, tipY, P, lw) {
-    ctx.strokeStyle = F(FOL[0], P); ctx.lineWidth = lw; ctx.lineCap = 'round';
+    // app patch: softer stems — mid-foliage tone at reduced alpha so they sit into the field
+    ctx.strokeStyle = hexA(F(mixHex(FOL[0], FOL[1], 0.55), P), 0.82); ctx.lineWidth = lw; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(x, base);
     ctx.quadraticCurveTo(x + (tipX - x) * 0.3, base - (base - tipY) * 0.55, tipX, tipY);
     ctx.stroke();
