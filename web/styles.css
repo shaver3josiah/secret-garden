@@ -32,7 +32,7 @@ html, body {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background: var(--paper);
+  background: #24351f;
   color: var(--ink);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
@@ -597,7 +597,7 @@ a.hb-chip:hover { border-color: var(--line-warm); background: rgba(255, 255, 255
 .trip-row .hval { font-weight: 600; color: var(--ink); white-space: nowrap; }
 
 .compass-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 6px 0 2px; }
-.compass-outer { position: relative; width: 190px; height: 190px; }
+.compass-outer { position: relative; width: min(84vw, 340px); aspect-ratio: 1; }
 .compass-rose {
   position: absolute; inset: 0;
   border: 2px solid var(--line-warm);
@@ -781,3 +781,94 @@ button.chip-info:hover { border-color: var(--line-warm); background: rgba(255, 2
 .tour-dots { display: flex; gap: 7px; justify-content: center; margin-bottom: 16px; }
 .tdot { width: 7px; height: 7px; border-radius: 50%; background: rgba(40, 60, 30, 0.18); transition: background 0.2s var(--ease), transform 0.2s var(--ease); }
 .tdot.on { background: var(--honey-deep); transform: scale(1.3); }
+
+/* ---------- collapsible drawer with the 2x controls ---------- */
+.drawer {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  grid-row: 3 / span 2;
+  min-width: 0;
+  max-width: 100%;
+}
+.drawer-handle {
+  align-self: center;
+  width: 96px;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 100px;
+  background: var(--panel);
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  color: var(--ink-muted);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+}
+.drawer-handle svg { transition: transform 0.35s var(--ease); }
+.drawer.closed .drawer-handle svg { transform: rotate(180deg); }
+.drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  max-height: 440px;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height 0.45s var(--ease), opacity 0.3s var(--ease);
+}
+.drawer.closed .drawer-body { max-height: 0; opacity: 0; pointer-events: none; }
+
+/* 2x controls inside the drawer */
+.drawer .hb-chip { min-height: 64px; padding: 14px 22px; font-size: 1.35rem; gap: 10px; }
+.drawer .hb-chip .glyph { font-size: 1.5rem; }
+.drawer .hb-open.gold { min-height: 68px; padding: 16px 26px; font-size: 1.4rem; gap: 10px; }
+.drawer .hb-open.gold svg { width: 26px; height: 26px; }
+.drawer .icon-btn { width: 82px; height: 82px; font-size: 2rem; }
+.drawer .scenes-btn { min-height: 78px; padding: 18px 26px; font-size: 1.45rem; gap: 12px; }
+.drawer .scenes-btn svg { width: 30px; height: 30px; }
+.drawer .route-btn { min-height: 78px; padding: 18px 24px; font-size: 1.4rem; gap: 10px; }
+.drawer .route-btn svg { width: 28px; height: 28px; }
+.drawer .dock { flex-wrap: wrap; row-gap: 10px; }
+.mode-btn img, .mode-btn svg { display: block; }
+
+/* chrome fade while looking up now covers the drawer */
+.drawer { transition: opacity 0.45s var(--ease); }
+.skyview .drawer { opacity: 0; pointer-events: none; }
+
+/* ---------- star-finder night mode: full black starry screen ---------- */
+body.starfield .sheet-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+  background:
+    radial-gradient(1.2px 1.2px at 12% 18%, rgba(240,244,255,0.9) 50%, transparent 51%),
+    radial-gradient(1px 1px at 34% 62%, rgba(240,244,255,0.7) 50%, transparent 51%),
+    radial-gradient(1.4px 1.4px at 56% 30%, rgba(240,244,255,0.95) 50%, transparent 51%),
+    radial-gradient(1px 1px at 71% 74%, rgba(240,244,255,0.65) 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 85% 12%, rgba(240,244,255,0.85) 50%, transparent 51%),
+    radial-gradient(1px 1px at 23% 86%, rgba(240,244,255,0.6) 50%, transparent 51%),
+    radial-gradient(1.3px 1.3px at 64% 51%, rgba(240,244,255,0.8) 50%, transparent 51%),
+    radial-gradient(1px 1px at 92% 44%, rgba(240,244,255,0.7) 50%, transparent 51%),
+    #04060c;
+}
+body.starfield #sheet-compass {
+  background: rgba(8, 11, 20, 0.94);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+body.starfield #sheet-compass h2,
+body.starfield #sheet-compass .em { color: #E8ECF4; }
+body.starfield #sheet-compass .about { color: rgba(226, 232, 244, 0.85); }
+body.starfield #sheet-compass .compass-rose {
+  background: radial-gradient(circle at 42% 36%, rgba(30, 38, 60, 0.9), rgba(10, 14, 26, 0.95));
+  border-color: rgba(216, 178, 106, 0.5);
+}
+body.starfield #sheet-compass .cpt { color: rgba(226, 232, 244, 0.85); }
+body.starfield #sheet-compass .cn { color: var(--honey-light); }
+body.starfield #sheet-compass .seg button { color: rgba(226,232,244,0.8); border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.06); }
+body.starfield #sheet-compass .seg button.on { color: #10141f; background: var(--honey-light); }
+body.starfield #sheet-compass .icon-btn { background: rgba(255,255,255,0.1); color: #E8ECF4; border-color: rgba(255,255,255,0.2); }
+body.starfield #const-note { color: var(--honey-light); }
+
+.drawer .hours-bar { flex-wrap: wrap; overflow: visible; row-gap: 10px; }
+.drawer .hb-open { margin-left: 0; }

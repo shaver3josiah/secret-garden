@@ -385,12 +385,12 @@
     const moonA = clamp(1 - alt / 0.14, 0, 1) * 0.92 * lookUp;
     if (moonA > 0.02) {
       const nf = nightFrac();
-      const mx = celestialX(nf), my = horizonY - Math.sin(Math.PI * nf) * horizonY * 0.7 + 12;
+      const mx = celestialX(nf), my = horizonY - Math.sin(Math.PI * nf) * horizonY * 0.7 + 12 - H * 0.125 * smooth(Math.sin(Math.PI * nf) * 2);
       drawMoon(mx, my, Math.max(14, U * 0.05), moonA);
     }
     if (sunA > 0.02) {
       const df = dayFrac();
-      const sx = celestialX(df), sy = horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8;
+      const sx = celestialX(df), sy = horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8 - H * 0.125 * smooth(Math.sin(Math.PI * df) * 2);
       drawSun(sx, sy, Math.max(16, U * 0.055), sunA);
     }
   }
@@ -468,17 +468,17 @@
   function cumulusLobes(cx, cy, w, h, seed) {
     const r = rng(seed);
     const lobes = [];
-    const n = 4 + Math.floor(r() * 2);
+    const n = 5 + Math.floor(r() * 2);
     for (let i = 0; i <= n; i++) {
       const t = i / n;
-      const rr = h * (0.5 + r() * 0.5) * (1 - Math.abs(t - 0.5) * 0.22);
-      lobes.push({ x: cx - w * 0.5 + t * w, y: cy + Math.sin(t * Math.PI) * h * 0.14 - rr * 0.1 + (r() - 0.5) * h * 0.14, r: rr });
+      const rr = h * (0.4 + r() * 0.34) * (1 - Math.abs(t - 0.5) * 0.2);
+      lobes.push({ x: cx - w * 0.5 + t * w, y: cy + Math.sin(t * Math.PI) * h * 0.12 - rr * 0.1 + (r() - 0.5) * h * 0.1, r: rr });
     }
-    lobes.push({ x: cx - w * (0.1 + r() * 0.14), y: cy - h * (0.5 + r() * 0.2), r: h * (0.56 + r() * 0.2) });
-    lobes.push({ x: cx + w * (0.16 + r() * 0.12), y: cy - h * (0.38 + r() * 0.18), r: h * (0.46 + r() * 0.16) });
-    lobes.push({ x: cx + w * (0.28 + r() * 0.06), y: cy - h * (0.26 + r() * 0.1), r: h * (0.5 + r() * 0.12) });
-    lobes.push({ x: cx + w * 0.04, y: cy - h * (0.4 + r() * 0.14), r: h * (0.52 + r() * 0.14) });
-    if (r() > 0.45) lobes.push({ x: cx - w * (0.28 + r() * 0.05), y: cy - h * (0.3 + r() * 0.12), r: h * (0.44 + r() * 0.12) });
+    lobes.push({ x: cx - w * (0.1 + r() * 0.14), y: cy - h * (0.42 + r() * 0.14), r: h * (0.44 + r() * 0.14) });
+    lobes.push({ x: cx + w * (0.16 + r() * 0.12), y: cy - h * (0.32 + r() * 0.14), r: h * (0.38 + r() * 0.12) });
+    lobes.push({ x: cx + w * (0.3 + r() * 0.05), y: cy - h * (0.22 + r() * 0.08), r: h * (0.4 + r() * 0.1) });
+    lobes.push({ x: cx + w * 0.04, y: cy - h * (0.34 + r() * 0.1), r: h * (0.42 + r() * 0.1) });
+    if (r() > 0.45) lobes.push({ x: cx - w * (0.3 + r() * 0.04), y: cy - h * (0.24 + r() * 0.1), r: h * (0.36 + r() * 0.1) });
     return lobes;
   }
   function traceLobes(lobes) {
@@ -598,6 +598,24 @@
       hz.addColorStop(1, "rgba(222,232,242," + (0.2 * (1 - nf) * (1 - i * 0.22)) + ")");
       ctx.fillStyle = hz;
       ctx.fillRect(-W * 0.4, baseY - hh * 0.25, W * 1.8, hh * 0.25);
+    }
+    if (state.settings.peakLabels) {
+      const names = ["Slide Mtn", "Blackhead Range", "Hunter Mtn", "Devil's Path"];
+      ctx.save();
+      ctx.font = "600 11px 'DM Sans', sans-serif";
+      ctx.textAlign = "center";
+      for (let i = 0; i < CATSKILL_LAYERS.length && i < names.length; i++) {
+        const lay = CATSKILL_LAYERS[i];
+        let peak = lay.pts[0];
+        for (const p of lay.pts) if (p[1] < peak[1]) peak = p;
+        const px = (-0.35 + peak[0] * 1.7) * W;
+        const py = horizonY - U * lift[i] + 1 - (1 - peak[1]) * U * hgt[i] - 7;
+        ctx.fillStyle = "rgba(20,28,44,0.35)";
+        ctx.fillText(names[i], px + 1, py + 1);
+        ctx.fillStyle = "rgba(238,244,250,0.82)";
+        ctx.fillText(names[i], px, py);
+      }
+      ctx.restore();
     }
   }
   function drawRidges() {
@@ -791,7 +809,7 @@
     }
   }
 
-  let boatDir = 1, boatModel = 0;
+  let boatDir = 1, boatModel = 0, boatHit = null;
   function drawBoat() {
     if (motionOn() && !document.hidden) {
       state.boatP += boatDir * (T - lastTs) * (0.9 + windAmp() * 0.5) / 90000;
@@ -800,6 +818,7 @@
     }
     const bx = W * (0.27 + 0.46 * state.boatP);
     const by = horizonY + (H - horizonY) * 0.24;
+    boatHit = { x: bx, y: by };
     // paper-cutout sloop from the element library; each turnaround swaps hulls
     ctx.save();
     ctx.translate(bx, by);
@@ -928,13 +947,20 @@
     const block = lines.length * sky.lh + sky.fs;
     sky.y = clamp(horizonY * 0.4, 120, Math.max(130, horizonY - block * 0.5 - U * 0.06));
   }
+  let verseGapUntil = 0;
   function driftActive() { return state.settings.autoRotate && motionOn(); }
   function drawSkyVerse() {
     if (!state.curVerse || !sky.lines.length) return;
+    if (verseGapUntil) {
+      if (Date.now() < verseGapUntil) return;   // seven quiet seconds of open sky
+      verseGapUntil = 0;
+      setVerse(pickVerse());
+      return;
+    }
     const dt = clamp(T - lastTs, 0, 80);
     if (driftActive() && !state.versePaused && !document.hidden) {
       sky.prog += dt / 42000;
-      if (sky.prog >= 1) { setVerse(pickVerse()); sky.prog = 0; return; }
+      if (sky.prog >= 1) { verseGapUntil = Date.now() + 7000; return; }
     }
     if (!driftActive()) sky.prog = 0.5;
     const p = sky.prog;
@@ -948,7 +974,7 @@
     const nightMode = sunAltitude() <= 0.09;
     // the verse rides one opaque cumulus, shape seeded per verse
     const block = sky.lines.length * sky.lh;
-    drawCumulus(cxp, yTop + block * 0.38, sky.tw * 1.16, Math.max(block * 1.32, sky.fs * 2.7), sky.cseed || 7, a, nightMode);
+    drawCumulus(cxp, yTop + block * 0.38, sky.tw * 1.1, Math.max(block * 1.14, sky.fs * 2.4), sky.cseed || 7, a, nightMode);
     ctx.save();
     ctx.globalAlpha = a;
     ctx.textAlign = "center";
@@ -1053,6 +1079,7 @@
   }
   function setVerse(v) {
     state.curVerse = v;
+    verseGapUntil = 0;
     let hsh = 0; for (let i = 0; i < v.ref.length; i++) hsh = (hsh * 31 + v.ref.charCodeAt(i)) >>> 0;
     sky.cseed = 7 + (hsh % 9973);
     el("verse-live").textContent = v.text + " " + v.ref;
@@ -1323,6 +1350,7 @@
     el("sheet-backdrop").classList.add("open");
   }
   function closeSheet() {
+    document.body.classList.remove("starfield");
     document.querySelectorAll(".sheet").forEach(s => s.classList.remove("open"));
     el("sheet-backdrop").classList.remove("open");
     if (THEMES["__preview__"] && state.themeId === "__preview__") { state.themeId = store.themeId || "secret-garden"; if (state.themeId === "__preview__") state.themeId = "secret-garden"; delete THEMES["__preview__"]; buildThemeChips(); buildScene(); }
@@ -1415,15 +1443,17 @@
   }
   function drawRoseGlyphs() {
     const c = el("rose-canvas"); if (!c || !skyList.length) return;
+    const cs = Math.round(c.parentElement.getBoundingClientRect().width) || 190;
+    if (c.width !== cs * 2) { c.width = cs * 2; c.height = cs * 2; }
     const g = c.getContext("2d");
     g.setTransform(2, 0, 0, 2, 0, 0);
-    g.clearRect(0, 0, 190, 190);
-    const cx = 95, cy = 95, rad = 64;
+    g.clearRect(0, 0, cs, cs);
+    const cx = cs / 2, cy = cs / 2, rad = cs * 0.335;
     for (const sc of skyList) {
       if (!sc.up) continue;
       const a = (sc.az - 90) * Math.PI / 180;   // dial frame: 0 deg = N = top of the rose
       const gx = cx + Math.cos(a) * rad, gy = cy + Math.sin(a) * rad;
-      const box = 20;
+      const box = Math.max(20, cs * 0.13);
       g.strokeStyle = "rgba(154,118,54,0.75)";
       g.fillStyle = "rgba(154,118,54,0.9)";
       g.lineWidth = 1;
@@ -1437,7 +1467,7 @@
       for (const p of sc.preview.pts) {
         g.beginPath(); g.arc(gx - box / 2 + p[0] * box, gy - box / 2 + p[1] * box, 1.1, 0, 6.2832); g.fill();
       }
-      g.font = "600 7px 'DM Sans', sans-serif";
+      g.font = "600 " + Math.max(7, Math.round(cs * 0.042)) + "px 'DM Sans', sans-serif";
       g.textAlign = "center";
       g.fillStyle = "rgba(61,75,54,0.85)";
       g.fillText(sc.name.slice(0, 3).toUpperCase(), gx, gy + box / 2 + 8);
@@ -1464,6 +1494,7 @@
   }
   function openCompass() {
     openSheet("compass");
+    if (starMode) document.body.classList.add("starfield");
     refreshSkyList();
     drawConstPreview();
     startRose();
@@ -1763,6 +1794,8 @@
     el("open-route").style.display = on ? "" : "none";
     el("open-route").classList.toggle("gold", on);
     el("open-hours").classList.toggle("gold", !on);
+    el("mode-boat").style.display = on ? "none" : "";
+    el("mode-garden").style.display = on ? "" : "none";
     persist(); initParticles();
     toast(on ? "Sailing mode. Fair winds." : "Back to the garden.");
     if (on && !state.sail.stops.length) { renderRoute(); openSheet("route"); }
@@ -1825,6 +1858,10 @@
     el("sail-toggle").onclick = () => setSailing(!state.sail.on);
     el("open-route").onclick = () => { renderRoute(); renderTrip(); renderFavs(); openSheet("route"); };
     el("loc-chip").onclick = openAbout;
+    el("drawer-handle").onclick = () => {
+      const closed = el("drawer").classList.toggle("closed");
+      el("drawer-handle").setAttribute("aria-expanded", closed ? "false" : "true");
+    };
     el("stop-add").onclick = addStop;
     el("stop-input").addEventListener("keydown", e => { if (e.key === "Enter") addStop(); });
     el("open-scenes").onclick = () => {
@@ -1846,6 +1883,7 @@
     window.addEventListener("deviceorientation", onHeading);
     document.querySelectorAll("#compass-mode button").forEach(b => b.onclick = () => {
       starMode = b.dataset.v === "star";
+      document.body.classList.toggle("starfield", starMode);
       document.querySelectorAll("#compass-mode button").forEach(x => x.classList.toggle("on", x === b));
       el("compass-note").textContent = compassNote();
       drawConstPreview();
@@ -1889,6 +1927,13 @@
       if (now - lastTap < 320) {
         lastTap = 0;
         if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
+        const mountainsOn = activeTheme().mountains || state.settings.backdrop === "mountains";
+        if (mountainsOn && cam < 0.3 && e.clientY > horizonY - U * 0.42 && e.clientY < horizonY + 6) {
+          state.settings.peakLabels = !state.settings.peakLabels;
+          persist();
+          toast(state.settings.peakLabels ? "Naming the mountains" : "Letting the mountains be");
+          return;
+        }
         partClouds();
         return;
       }
@@ -1897,6 +1942,10 @@
       tapTimer = setTimeout(() => {
         tapTimer = null;
         if (camTarget > 0.5 || cam > 0.5) { camTarget = 0; camVel = 0; return; }
+        if (state.sail.on && boatHit && Math.abs(x + panX - boatHit.x) < U * 0.2 && Math.abs(y - boatHit.y) < U * 0.2) {
+          renderRoute(); renderTrip(); renderFavs(); openSheet("route");
+          return;
+        }
         if (y < horizonY) setVerse(pickVerse());
       }, 300);
     });
@@ -1914,7 +1963,7 @@
     window.addEventListener("resize", () => { clearTimeout(window.__rt); window.__rt = setTimeout(resize, 180); });
     buildThemeChips();
     wire();
-    if (state.sail.on) { el("sail-toggle").setAttribute("aria-pressed", "true"); el("open-route").style.display = ""; el("open-route").classList.add("gold"); el("open-hours").classList.remove("gold"); }
+    if (state.sail.on) { el("sail-toggle").setAttribute("aria-pressed", "true"); el("open-route").style.display = ""; el("open-route").classList.add("gold"); el("open-hours").classList.remove("gold"); el("mode-boat").style.display = "none"; el("mode-garden").style.display = ""; }
     setVerse(pickVerse());
     updateConditions();
     renderHours();

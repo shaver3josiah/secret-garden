@@ -42,6 +42,11 @@
     </div>
   </main>
 
+  <div class="drawer" id="drawer">
+  <button class="drawer-handle" id="drawer-handle" aria-expanded="true" aria-label="Hide or show the controls">
+    <svg width="26" height="12" viewBox="0 0 26 12" fill="none" aria-hidden="true"><path d="M2 2l11 8 11-8" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+  <div class="drawer-body" id="drawer-body">
   <div class="hours-bar" role="group" aria-label="Next hours">
     <a class="hb-chip" id="hb-rain-link" target="_blank" rel="noopener" aria-label="Check rain forecast on Google"><span class="glyph">&#128167;</span><b id="hb-rain">--%</b></a>
     <a class="hb-chip" id="hb-wind-link" target="_blank" rel="noopener" aria-label="Check wind forecast on Google"><span class="glyph">&#127788;&#65039;</span><b id="hb-wind">--</b></a>
@@ -56,12 +61,17 @@
     </button>
     <div class="dock-tools">
       <button class="icon-btn" id="open-verses" aria-label="Her verses">&#10077;</button>
-      <button class="icon-btn" id="sail-toggle" aria-pressed="false" aria-label="Sailing mode">&#9973;</button>
+      <button class="icon-btn mode-btn" id="sail-toggle" aria-pressed="false" aria-label="Switch scene mode">
+        <svg id="mode-boat" width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13" stroke="#4A4238" stroke-width="1.6" stroke-linecap="round"/><path d="M12.6 4.2c3 2.6 4.6 5.9 5 9.3h-5V4.2Z" fill="#F4F7F0" stroke="#9A7636" stroke-width="1.1" stroke-linejoin="round"/><path d="M11.4 6.2v7.3H7c.8-2.9 2.3-5.4 4.4-7.3Z" fill="#DFECF2" stroke="#9A7636" stroke-width="1.1" stroke-linejoin="round"/><path d="M4.5 16h15c-.7 2.3-2.6 4-6 4h-3c-3.4 0-5.3-1.7-6-4Z" fill="#8a5a3b" stroke="#5C4930" stroke-width="1.1" stroke-linejoin="round"/></svg>
+        <img id="mode-garden" src="./icons/favicon.svg" alt="" width="36" height="36" style="display:none">
+      </button>
       <button class="chip route-btn" id="open-route" style="display:none"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3.2a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2Zm0 0v9.2m0 0c-3 0-5.4-1.8-6-4.4l1.8.7M8 12.4c3 0 5.4-1.8 6-4.4l-1.8.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Routes</span></button>
       <button class="icon-btn" id="open-compass" aria-label="Compass and star finder">&#129517;</button>
       <button class="icon-btn" id="open-about" aria-label="Settings and about">&#9881;</button>
     </div>
   </nav>
+  </div>
+  </div>
 </div>
 
 <div class="sheet-backdrop" id="sheet-backdrop"></div>

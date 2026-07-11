@@ -49,9 +49,9 @@ class MainActivity : AppCompatActivity() {
 
         val insetsController = WindowInsetsControllerCompat(window, window.decorView)
         insetsController.isAppearanceLightStatusBars = true
-        insetsController.isAppearanceLightNavigationBars = true
+        insetsController.isAppearanceLightNavigationBars = false
         window.statusBarColor = ContextCompat.getColor(this, R.color.garden_bg)
-        window.navigationBarColor = ContextCompat.getColor(this, R.color.garden_bg)
+        window.navigationBarColor = ContextCompat.getColor(this, R.color.garden_ground)
 
         assetLoader = WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))

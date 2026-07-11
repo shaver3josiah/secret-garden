@@ -219,6 +219,9 @@
     ctx.beginPath(); ctx.moveTo(x - h * 0.01, y - h * 0.28); ctx.quadraticCurveTo(x - h * 0.14, y - h * 0.42, cx - R * 0.7, cy + R * 0.15); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(x, y - h * 0.34); ctx.quadraticCurveTo(x + h * 0.12, y - h * 0.48, cx + R * 0.65, cy); ctx.stroke();
     var sway = Math.sin(o.t * 0.5 + o.seed) * 2 * wind;
+    // app patch: solid blossom heart so the crown never shows a hole
+    ctx.fillStyle = hexA(B(mixHex('#E7A9C0', '#F6E3ED', 0.4), P), 0.95);
+    E(ctx, cx + sway * 0.6, cy - R * 0.12, R * 0.62, R * 0.5); ctx.fill();
     for (var i = 0; i < 10; i++) {
       var a = r() * TAU, rr = Math.sqrt(r()) * R;
       var bx = cx + Math.cos(a) * rr * 1.15 + sway, by = cy + Math.sin(a) * rr * 0.75;
