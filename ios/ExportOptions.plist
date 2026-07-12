@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- app-store-connect is the current method name (Xcode 15.3+). Signing stays
+       automatic so cloud signing manages the distribution certificate/profile. -->
+  <key>method</key>
+  <string>app-store-connect</string>
+  <key>signingStyle</key>
+  <string>automatic</string>
+  <key>uploadSymbols</key>
+  <true/>
+  <!-- false: CI already sets CURRENT_PROJECT_VERSION to the GitHub run number,
+       which is unique and monotonic. Letting Apple manage it would make the
+       build number on TestFlight disagree with the CI run that produced it. -->
+  <key>manageAppVersionAndBuildNumber</key>
+  <false/>
+</dict>
+</plist>

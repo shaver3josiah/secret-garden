@@ -1,0 +1,75 @@
+# XcodeGen spec for the Secret Garden iOS shell.
+# CI runs `xcodegen generate` in this directory to produce SecretGarden.xcodeproj.
+#
+# Landmines this layout avoids (see nomac-ios-testflight reference):
+# - Assets.xcassets is listed under `sources` so actool COMPILES it (icon lands in
+#   the bundle). Never list it under `resources` as a folder — raw copy = no icon.
+# - ../web IS a folder reference (type: folder) on purpose: the built app bundle
+#   gets a verbatim web/ directory, same single-source-of-truth as the Android
+#   Gradle copy of the same folder.
+# - CFBundleIconName declared explicitly; missing it = TestFlight upload rejection.
+name: SecretGarden
+options:
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  SecretGarden:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Assets.xcassets
+      - path: ../web
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jobdash.secretgarden
+        MARKETING_VERSION: "1.0.0"
+        # CI overrides with CURRENT_PROJECT_VERSION=<github run number> at archive time.
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: "$(APPLE_TEAM_ID)"
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: true
+        TARGETED_DEVICE_FAMILY: "1,2"
+    info:
+      path: Generated-Info.plist
+      properties:
+        CFBundleDisplayName: Secret Garden
+        CFBundleIconName: AppIcon
+        ITSAppUsesNonExemptEncryption: false
+        NSLocationWhenInUseUsageDescription: >-
+          Secret Garden uses your location once, when you tap "Use my location",
+          so the sky, weather, and sunlight in your garden match the real ones
+          outside your window. It is never tracked or shared.
+        NSMotionUsageDescription: >-
+          The compass rose uses motion sensors so it can point the way the
+          garden actually faces.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: SplashLogo
+        # iPhone is portrait-only: the open drawer control stack (~420pt) can't fit
+        # a landscape iPhone viewport, and the webview's scroll is disabled (the page
+        # owns gestures), so landscape would clip the Done/dock controls off-screen
+        # with no way to reach them. Android gets away with all orientations because
+        # its WebView scrolls; iOS does not. iPad's short side (768pt+) fits, so it
+        # keeps all four for multitasking.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Android paints a light sage status bar with dark icons; same choice here,
+        # fixed app-wide (the page top is always sage, in both system themes).
+        UIViewControllerBasedStatusBarAppearance: false
+        UIStatusBarStyle: UIStatusBarStyleDarkContent
+schemes:
+  SecretGarden:
+    build:
+      targets:
+        SecretGarden: all
+    archive:
+      config: Release

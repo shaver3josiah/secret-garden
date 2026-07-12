@@ -1,0 +1,23 @@
+# Uploads the CI-built ipa to TestFlight.
+# Env vars (set by .github/workflows/ios-release.yml):
+#   APP_STORE_CONNECT_API_KEY_ID  - App Store Connect API Key ID
+#   APP_STORE_CONNECT_ISSUER_ID   - Issuer ID
+#   ASC_KEY_FILEPATH              - path to the raw .p8 written from APP_STORE_CONNECT_API_KEY
+#   IPA_PATH                      - path to the exported .ipa
+default_platform(:ios)
+
+platform :ios do
+  lane :upload_testflight do
+    app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      key_filepath: ENV["ASC_KEY_FILEPATH"]
+    )
+    pilot(
+      ipa: ENV["IPA_PATH"],
+      # Don't burn macOS-runner minutes waiting for Apple's processing queue;
+      # the build appears in TestFlight a few minutes after the run finishes.
+      skip_waiting_for_build_processing: true
+    )
+  end
+end

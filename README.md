@@ -32,6 +32,10 @@ If the repository secret `KEYSTORE_PASSPHRASE` is set, the first CI run generate
 
 Requires JDK 17 and Android SDK 34. From `android/`, run `gradle wrapper --gradle-version 8.7` once, then `./gradlew assembleRelease`.
 
+## iOS
+
+`ios/` is a thin SwiftUI shell mirroring `android/`: a WKWebView serving the bundled `web/` app, so the web app stays the single source of truth. `.github/workflows/ios-release.yml` builds, signs, and uploads it to TestFlight on every `ios-v*` tag, entirely on a GitHub macOS runner — no Mac needed. The one-time Apple account setup lives in [`ios/APPLE-SETUP.md`](ios/APPLE-SETUP.md).
+
 ## Provenance
 
 The garden itself is painted by `web/garden-elements.js`, an original procedural element library from a Claude Design session: five tree species (including the weeping willow that carries the robin's nest), five flower species planted in golden-angle clusters by a Poisson-disc layout, grass, a koi-and-lily pond, a nesting robin on a forty-second feeding loop, butterflies, and a paper-cutout sloop, all tinted by continuous time-of-day palettes. The app mark — a sailboat cradled in a ring of daisies — is original vector art in `design/logo/`. `scripts/render_master.py` rasterizes it with headless Chrome and `scripts/generate_icons.py` composites every icon, splash, and adaptive-launcher size from that master; `scripts/` also holds the font bundler. `design/art-brief.md` records the art direction behind the archway, wisteria, and lantern scene elements, which are original procedural drawing. Fonts are DM Sans and Playfair Display under the SIL Open Font License. Scripture text is the Berean Standard Bible, public domain. Code is MIT licensed.
