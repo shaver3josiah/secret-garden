@@ -134,6 +134,9 @@ struct WebView: UIViewRepresentable {
         // Mirrors Android onRenderProcessGone: same view instance survives on iOS,
         // a reload of the start URL is the whole recovery.
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            // Re-show the splash during recovery, same as first launch — otherwise the
+            // user sees a blank white webview flash instead of the sage handoff.
+            parent.isLoaded = false
             loadStart(in: webView)
         }
     }

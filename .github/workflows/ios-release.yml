@@ -90,7 +90,7 @@ jobs:
             -authenticationKeyID "$APP_STORE_CONNECT_API_KEY_ID" \
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CURRENT_PROJECT_VERSION=$(( ${{ github.run_number }} * 100 + ${{ github.run_attempt }} ))
+            CURRENT_PROJECT_VERSION=$(( ${{ github.run_number }} * 1000 + ${{ github.run_attempt }} ))
 
       - name: Export ipa
         run: |

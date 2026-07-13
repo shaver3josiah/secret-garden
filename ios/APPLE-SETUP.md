@@ -4,6 +4,8 @@ These are the steps only a human with access to the JobDash Apple Developer acco
 
 If a step here is skipped or done with the wrong role, the failure shows up minutes into a CI run with a cryptic error, not at the start. Careful once beats debugging later.
 
+> **Do this before step 1.** Sign in at https://developer.apple.com and at App Store Connect → Business → Agreements and accept any pending Apple Developer Program License Agreement. It doesn't only break signing later (step 4) — an unaccepted agreement blocks App ID registration and new-app creation, so step 1 will wall you at the very first click until it's cleared.
+
 ## 1. Create the app record
 
 Sign in at https://appstoreconnect.apple.com as an **Account Holder or Admin** on the JobDash team — lesser roles cannot register App IDs or create app records.
@@ -41,6 +43,8 @@ Check https://developer.apple.com and App Store Connect → Business → Agreeme
 
 After the **first** build finishes processing (App Store Connect → TestFlight, usually a few minutes after upload), add internal testers under TestFlight → Internal Testing. Internal testers get the build on their phones within minutes, no review needed.
 
+Internal TestFlight builds **expire 90 days after upload** — testers lose access until a newer build is shipped. Re-run `./Ship-iOS.ps1` before then to keep the app alive on her phone.
+
 ## 6. Ship
 
 From the repo root on Windows:
@@ -50,3 +54,5 @@ From the repo root on Windows:
 ```
 
 or push a tag matching `ios-v*` (e.g. `ios-v1.0.0`). Either way, watch the run at https://github.com/shaver3josiah/secret-garden/actions — the `iOS Release` workflow archives, signs, and uploads to TestFlight.
+
+A green run means the upload succeeded, **not** that Apple accepted the build — the pipeline deliberately doesn't wait for Apple's processing (to save runner minutes). After the run turns green, check App Store Connect → TestFlight → Builds (or your email) for any "Missing Compliance" or processing-failure notice before assuming the build reached testers.
