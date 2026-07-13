@@ -1198,37 +1198,45 @@
       ctx.fillStyle = gl;
       ctx.fillRect(gx - U * 0.3, horizonY, U * 0.6, H - horizonY);
     }
-    ctx.strokeStyle = "rgba(255,255,255,0.28)";
+    const G = H - horizonY;
+    // perspective ripple lines: compressed and faint near the horizon, opening into bigger swells at her feet
     ctx.lineWidth = 1;
-    for (let i = 0; i < 10; i++) {
-      const yy = horizonY + (i + 0.6) / 10.5 * (H - horizonY);
-      const off = motionOn() ? Math.sin(T * 0.0012 + i * 1.7) * (6 + i) : 0;
-      ctx.globalAlpha = 0.32 - i * 0.02;
+    const nLines = perfTier ? 11 : 15;
+    for (let i = 0; i < nLines; i++) {
+      const p = i / (nLines - 1), depth = p * p;                 // quadratic spacing = real perspective
+      const yy = horizonY + G * (0.03 + depth * 0.95);
+      const amp = 2 + depth * 15;                                // waves grow toward the viewer
+      const spd = motionOn() ? T * 0.0011 * (0.6 + depth) : i;
+      const o1 = Math.sin(spd + i * 1.7) * amp, o2 = Math.cos(spd * 0.8 + i * 2.3) * amp * 0.5;
+      ctx.strokeStyle = "rgba(255,255,255," + (0.05 + depth * 0.22).toFixed(3) + ")";
       ctx.beginPath();
       ctx.moveTo(-W * 0.4, yy);
-      ctx.quadraticCurveTo(W * 0.5 + off, yy + 2, W * 1.4, yy);
+      ctx.bezierCurveTo(W * 0.2 + o1, yy + amp * 0.16, W * 0.72 + o2, yy - amp * 0.12, W * 1.4, yy);
       ctx.stroke();
     }
-    // a finer set of ripples drifting the other way — gentle counter-motion, still cheap
-    ctx.strokeStyle = "rgba(255,255,255,0.16)";
-    for (let i = 0; i < 6; i++) {
-      const yy = horizonY + (i * 1.7 + 1.2) / 10.5 * (H - horizonY);
-      const off = motionOn() ? Math.sin(-T * 0.0016 + i * 2.3) * (4 + i * 1.5) : 0;
-      ctx.globalAlpha = 0.16 - i * 0.02;
+    // short wavelets scattered over the surface, drifting downstream toward her — the "chop" of the river
+    const nW = perfTier ? 14 : 22;
+    const flow = motionOn() ? (T * 0.00004) % 1 : 0.35;
+    for (let i = 0; i < nW; i++) {
+      const pp = ((i * 0.293 + flow * (0.4 + (i % 3) * 0.28)) % 1);
+      const yy = horizonY + G * (0.08 + pp * 0.88);
+      const xx = ((i * 0.618) % 1) * W * 1.2 - W * 0.1 + Math.sin(i * 2.1) * 22;
+      const len = 3 + pp * 15, edge = 1 - Math.abs(pp - 0.5) * 0.5;
+      ctx.globalAlpha = (0.05 + pp * 0.2) * edge;
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = Math.max(0.7, pp * 1.6);
       ctx.beginPath();
-      ctx.moveTo(-W * 0.4, yy + 5);
-      ctx.quadraticCurveTo(W * 0.45 + off, yy + 7, W * 1.4, yy + 5);
+      ctx.moveTo(xx - len, yy);
+      ctx.quadraticCurveTo(xx, yy + pp * 3.5, xx + len, yy);
       ctx.stroke();
     }
-    // a handful of slow specular glints twinkling on the surface — seven tiny dashes, no per-pixel work
+    // a few slow specular glints twinkling on the surface
     ctx.fillStyle = "#fff";
-    for (let i = 0; i < 7; i++) {
-      const gy = horizonY + (H - horizonY) * (0.22 + (i * 0.11) % 0.72);
-      const gx = ((i * 0.17 + (motionOn() ? T * 0.00002 * (1 + i % 3) : 0)) % 1) * W * 1.3 - W * 0.15;
+    for (let i = 0; i < 6; i++) {
+      const gy = horizonY + G * (0.3 + (i * 0.13) % 0.66);
+      const gx = ((i * 0.37 + (motionOn() ? T * 0.00002 * (1 + i % 3) : 0)) % 1) * W * 1.3 - W * 0.15;
       const tw = motionOn() ? Math.max(0, Math.sin(T * 0.003 + i * 1.9)) : 0.35;
-      ctx.globalAlpha = 0.42 * tw;
-      const gw = 2 + (gy - horizonY) / (H - horizonY) * 5;
-      ctx.fillRect(gx, gy, gw, 1.3);
+      ctx.globalAlpha = 0.4 * tw;
+      ctx.fillRect(gx, gy, 2 + (gy - horizonY) / G * 5, 1.3);
     }
     ctx.globalAlpha = 1;
   }
@@ -1271,50 +1279,31 @@
     const by = horizonY + (H - horizonY) * 0.24;
     boatHit = { x: bx, y: by };
     const s = U * 0.3;
-    boatReflection(bx, by, s);          // mirror + wake, under the hull
-    // paper-cutout sloop from the element library; each turnaround swaps hulls
+    const wl = by + s * 0.12;            // the water surface; the hull bobs against this fixed line
+    // draw the sloop CLIPPED to above the waterline, so its bottom is genuinely under the water —
+    // no shadow, no bowl, the river simply hides the submerged part of the hull
     ctx.save();
+    ctx.beginPath(); ctx.rect(bx - s * 1.7, 0, s * 3.4, wl); ctx.clip();
     ctx.translate(bx, by);
     ctx.scale(boatDir, 1);
     GE.drawSailboat(ctx, { x: 0, y: 0, s: s, seed: boatModel ? 4 : 11, t: motionOn() ? T * 0.001 : 0, P: gePalette() });
     ctx.restore();
-    boatWaterline(bx, by, s);           // water over the submerged bottom + a lapping foam line
+    boatWaterline(bx, s, wl);            // a soft foam line + a couple of small ripples hugging the hull
   }
-  function boatReflection(bx, by, s) {
-    const wl = by + s * 0.1;
+  function boatWaterline(bx, s, wl) {
+    const hw = s * 0.5, t = motionOn() ? T * 0.002 : 0;
     ctx.save();
-    ctx.globalAlpha = 0.13;
-    ctx.fillStyle = "rgb(26,38,50)";
-    ctx.beginPath(); ctx.ellipse(bx, wl + s * 0.18, s * 0.42, s * 0.15, 0, 0, 6.2832); ctx.fill();
-    ctx.restore();
-  }
-  function boatWaterline(bx, by, s) {
-    const sc = skyColors(), alt = sunAltitude(), nk = clamp(1 - alt * 3, 0, 1);
-    const wc = mix(mix(sc.hor, [110, 138, 148], 0.42), [56, 74, 96], nk * 0.5);
-    const t = motionOn() ? T * 0.002 : 0;
-    const hw = s * 0.52;
-    const wl = by + s * 0.1 + (motionOn() ? Math.sin(T * 0.00085) * s * 0.015 : 0);   // waterline, gentle bob
-    ctx.save();
-    // water over the submerged hull bottom — clip to below the waterline, tint the belly
-    ctx.save();
-    ctx.beginPath(); ctx.rect(bx - hw * 1.5, wl, hw * 3, s * 0.45); ctx.clip();
-    ctx.beginPath(); ctx.ellipse(bx, by + s * 0.04, hw * 1.04, s * 0.3, 0, 0, 6.2832);
-    ctx.fillStyle = "rgba(" + wc[0] + "," + wc[1] + "," + wc[2] + ",0.74)";
-    ctx.fill();
-    ctx.restore();
-    // waterline foam — a bright line lapping the hull, curling at bow and stern
-    ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = Math.max(1, s * 0.015); ctx.lineCap = "round";
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(255,255,255,0.42)"; ctx.lineWidth = Math.max(1, s * 0.018);
     ctx.beginPath();
-    ctx.moveTo(bx - hw * 1.15, wl + Math.sin(t + 2) * s * 0.01);
-    ctx.quadraticCurveTo(bx - hw * 0.4, wl - s * 0.012, bx, wl + s * 0.004);
-    ctx.quadraticCurveTo(bx + hw * 0.4, wl + s * 0.014, bx + hw * 1.15, wl + Math.sin(t) * s * 0.01);
+    ctx.moveTo(bx - hw * 0.96, wl);
+    ctx.quadraticCurveTo(bx, wl + s * 0.014, bx + hw * 0.96, wl);   // gentle smile of foam at the hull's waterline
     ctx.stroke();
-    // two faint wake ripples fanning out from the hull
-    for (let i = 1; i <= 2; i++) {
-      ctx.globalAlpha = 0.2 - i * 0.055;
+    for (let i = 1; i <= 2; i++) {                                   // small ripples right at the hull, no wide fans
+      ctx.globalAlpha = 0.14 - i * 0.035;
       ctx.strokeStyle = "#fff"; ctx.lineWidth = Math.max(0.8, s * 0.008);
-      const rr = hw * (1.1 + i * 0.5) + (motionOn() ? Math.sin(t * 0.7 + i) * s * 0.02 : 0);
-      ctx.beginPath(); ctx.ellipse(bx, wl + s * 0.05, rr, rr * 0.14, 0, Math.PI * 0.1, Math.PI * 0.9); ctx.stroke();
+      const rr = hw * (1.0 + i * 0.16), wob = motionOn() ? Math.sin(t + i) * s * 0.006 : 0;
+      ctx.beginPath(); ctx.ellipse(bx, wl + s * 0.02 + wob, rr, s * (0.02 + i * 0.006), 0, Math.PI * 0.2, Math.PI * 0.8); ctx.stroke();
     }
     ctx.restore();
   }
@@ -1352,30 +1341,73 @@
   }
   // a little lighthouse further upstream, on the far bank, with a slow blinking beam
   function drawLighthouse() {
-    const g = H - horizonY, bx = W * 0.82, base = horizonY + g * 0.12, h = g * 0.15, w = h * 0.26;
+    const g = H - horizonY, bx = W * 0.82, base = horizonY + g * 0.13, h = g * 0.17, w = h * 0.26;
     const night = isNight(), nf = clamp(1 - sunAltitude() * 3, 0, 1);
+    const white = night ? "rgb(120,128,140)" : "rgb(236,231,220)";
+    const red = night ? "rgb(112,66,62)" : "rgb(188,92,84)";
+    const dark = night ? "rgb(52,60,70)" : "rgb(64,78,86)";
+    const rockD = night ? "rgb(46,54,58)" : "rgb(96,102,100)";
+    const rockL = night ? "rgb(66,76,80)" : "rgb(142,148,142)";
     ctx.save();
-    ctx.fillStyle = "rgba(38,50,42,0.7)";                              // rocky footing
-    ctx.beginPath(); ctx.ellipse(bx, base, w * 0.95, h * 0.06, 0, 0, 6.2832); ctx.fill();
-    ctx.fillStyle = night ? "rgb(120,128,140)" : "rgb(234,228,215)";   // tapered tower
+    // rocks around the base — a little clump the tower stands on
+    const rk = (cx, cy, rw, rh) => {
+      ctx.fillStyle = rockD;
+      ctx.beginPath();
+      ctx.moveTo(cx - rw, cy);
+      ctx.bezierCurveTo(cx - rw, cy - rh, cx - rw * 0.35, cy - rh * 1.25, cx - rw * 0.05, cy - rh * 1.02);
+      ctx.bezierCurveTo(cx + rw * 0.4, cy - rh * 1.2, cx + rw, cy - rh, cx + rw, cy);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = rockL;
+      ctx.beginPath(); ctx.ellipse(cx - rw * 0.16, cy - rh * 0.7, rw * 0.42, rh * 0.28, -0.35, 0, 6.2832); ctx.fill();
+    };
+    rk(bx - w * 1.0, base + h * 0.02, w * 0.7, h * 0.13);
+    rk(bx + w * 1.05, base + h * 0.01, w * 0.75, h * 0.15);
+    rk(bx - w * 0.35, base + h * 0.05, w * 0.6, h * 0.1);
+    rk(bx + w * 0.42, base + h * 0.05, w * 0.55, h * 0.09);
+    rk(bx, base + h * 0.07, w * 0.95, h * 0.12);
+    // foundation plinth
+    ctx.fillStyle = dark;
+    ctx.fillRect(bx - w * 0.62, base - h * 0.06, w * 1.24, h * 0.09);
+    // tapered shaft
+    ctx.fillStyle = white;
     ctx.beginPath();
-    ctx.moveTo(bx - w * 0.6, base); ctx.lineTo(bx - w * 0.34, base - h); ctx.lineTo(bx + w * 0.34, base - h); ctx.lineTo(bx + w * 0.6, base);
+    ctx.moveTo(bx - w * 0.55, base - h * 0.05); ctx.lineTo(bx - w * 0.32, base - h);
+    ctx.lineTo(bx + w * 0.32, base - h); ctx.lineTo(bx + w * 0.55, base - h * 0.05);
     ctx.closePath(); ctx.fill();
-    ctx.fillStyle = night ? "rgb(116,70,66)" : "rgb(184,90,82)";       // red band
-    ctx.beginPath(); ctx.moveTo(bx - w * 0.47, base - h * 0.5); ctx.lineTo(bx + w * 0.47, base - h * 0.5); ctx.lineTo(bx + w * 0.42, base - h * 0.66); ctx.lineTo(bx - w * 0.42, base - h * 0.66); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = night ? "rgb(58,68,78)" : "rgb(70,84,92)";         // lantern room
-    ctx.fillRect(bx - w * 0.3, base - h - h * 0.13, w * 0.6, h * 0.13);
-    ctx.fillStyle = night ? "rgb(78,50,48)" : "rgb(120,62,56)";        // roof
-    ctx.beginPath(); ctx.moveTo(bx - w * 0.37, base - h - h * 0.13); ctx.lineTo(bx, base - h - h * 0.3); ctx.lineTo(bx + w * 0.37, base - h - h * 0.13); ctx.closePath(); ctx.fill();
-    const cy = base - h - h * 0.06;
-    const blink = motionOn() ? Math.pow(0.5 + 0.5 * Math.sin(T * 0.0021), 4) : 0.25;
+    // two red bands, narrowing with the taper
+    const band = (yy, hh) => { const t0 = (base - yy) / h, hwB = w * (0.55 - 0.23 * t0); ctx.fillStyle = red; ctx.fillRect(bx - hwB, yy, hwB * 2, hh); };
+    band(base - h * 0.34, h * 0.1);
+    band(base - h * 0.66, h * 0.09);
+    // soft shading down the right flank for volume
+    ctx.fillStyle = night ? "rgba(0,0,0,0.12)" : "rgba(40,50,60,0.1)";
+    ctx.beginPath();
+    ctx.moveTo(bx + w * 0.1, base - h); ctx.lineTo(bx + w * 0.32, base - h); ctx.lineTo(bx + w * 0.55, base - h * 0.05); ctx.lineTo(bx + w * 0.3, base - h * 0.05);
+    ctx.closePath(); ctx.fill();
+    // gallery platform, then the lantern room
+    ctx.fillStyle = dark;
+    ctx.fillRect(bx - w * 0.42, base - h - h * 0.04, w * 0.84, h * 0.05);
+    const lrw = w * 0.5, lrh = h * 0.16, lry = base - h - h * 0.04, cy = lry - lrh * 0.5;
+    ctx.fillStyle = dark;
+    ctx.fillRect(bx - lrw / 2, lry - lrh, lrw, lrh);
+    // dome roof + finial
+    ctx.fillStyle = red;
+    ctx.beginPath();
+    ctx.moveTo(bx - lrw * 0.62, lry - lrh);
+    ctx.quadraticCurveTo(bx, lry - lrh - h * 0.16, bx + lrw * 0.62, lry - lrh);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx, lry - lrh - h * 0.15, w * 0.05, 0, 6.2832); ctx.fill();
+    // the lantern glows and the beam sweeps left over the water
+    const blink = motionOn() ? Math.pow(0.5 + 0.5 * Math.sin(T * 0.0021), 4) : 0.3;
+    const winA = night ? (0.35 + 0.65 * blink) : (0.42 + 0.5 * blink);
+    ctx.fillStyle = "rgba(255,242,196," + winA.toFixed(2) + ")";
+    ctx.fillRect(bx - lrw * 0.32, cy - lrh * 0.3, lrw * 0.64, lrh * 0.6);
     if (blink > 0.04) {
-      const lr = h * 0.6, a = (night ? 0.95 : 0.5 + nf * 0.2) * blink;
+      const lr = h * 0.65, a = (night ? 0.95 : 0.45 + nf * 0.25) * blink;
       const gl = ctx.createRadialGradient(bx, cy, 0, bx, cy, lr);
       gl.addColorStop(0, "rgba(255,240,190," + a.toFixed(2) + ")"); gl.addColorStop(1, "rgba(255,240,190,0)");
       ctx.fillStyle = gl; ctx.fillRect(bx - lr, cy - lr, lr * 2, lr * 2);
-      ctx.globalAlpha = a * 0.5; ctx.fillStyle = "rgba(255,240,190,0.5)";
-      ctx.beginPath(); ctx.moveTo(bx, cy); ctx.lineTo(bx - lr * 2.4, cy - lr * 0.45); ctx.lineTo(bx - lr * 2.4, cy + lr * 0.2); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = a * 0.45; ctx.fillStyle = "rgba(255,240,190,0.6)";
+      ctx.beginPath(); ctx.moveTo(bx, cy); ctx.lineTo(bx - lr * 2.6, cy - lr * 0.5); ctx.lineTo(bx - lr * 2.6, cy + lr * 0.22); ctx.closePath(); ctx.fill();
       ctx.globalAlpha = 1;
     }
     ctx.restore();
