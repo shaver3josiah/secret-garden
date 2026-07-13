@@ -61,6 +61,9 @@ jobs:
 
       - name: Build
         working-directory: android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: 1.0.${{ github.run_number }}
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Rename
