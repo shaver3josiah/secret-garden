@@ -339,7 +339,7 @@
     const scale = clamp(W / 1100, 0.4, 1.2), k = calm ? "clear" : wxKind(), th = activeTheme();
     const heavy = (motionOn() ? 1 : 0.25) * (perfTier ? 0.55 : 1);
     rain = []; snow = []; petals = []; pollen = []; flies = []; clouds = [];
-    const cloudN = clamp(Math.round(2 + state.weather.cloud / 16), 2, 9);
+    const cloudN = state.weather.cloud <= 0 ? 0 : clamp(Math.round(2 + state.weather.cloud / 16), 2, 9);
     for (let i = 0; i < cloudN; i++) clouds.push({ x: Math.random() * W * 1.2 - W * 0.1, y: (0.08 + Math.random() * 0.45) * horizonY, s: (0.6 + Math.random() * 1.1) * clamp(U / 700, 0.55, 1.25), sp: 0.004 + Math.random() * 0.01, op: 0.35 + Math.random() * 0.4 });
     buildZenithField();
     if (k === "rain") { const n = Math.round((state.weather.code >= 80 || state.weather.code >= 63 ? 240 : 150) * scale * heavy); for (let i = 0; i < n; i++) rain.push({ x: Math.random() * W, y: Math.random() * H, len: 9 + Math.random() * 14, sp: 7 + Math.random() * 6 }); }
@@ -564,11 +564,33 @@
   let cam = 0, camTarget = 0, camVel = 0, dragY = null, dragMoved = false, camAt = 0;
   let panX = 0, panTarget = 0, panAt = 0, dragX0 = 0, dragAxis = null;   // side-to-side peek: one screen-third each way
   let zfield = [];
+
+  // ---------- pinch to zoom the scene up to 2x, then it eases back on its own ----------
+  const pointers = new Map();
+  let pinching = false, pinchStartDist = 0, pinchStartScale = 1, pinchOx = 0, pinchOy = 0;
+  let zoomScale = 1, zoomTimer = null;
+  function applyZoom(scale, ox, oy) {
+    zoomScale = scale;
+    if (ox != null) cv.style.transformOrigin = ox + "px " + oy + "px";
+    cv.style.transform = scale > 1.001 ? "scale(" + scale.toFixed(3) + ")" : "";
+  }
+  function resetZoom() {
+    if (zoomTimer) { clearTimeout(zoomTimer); zoomTimer = null; }
+    cv.style.transition = "transform 0.8s cubic-bezier(0.22,1,0.36,1)";
+    applyZoom(1);
+    setTimeout(() => { cv.style.transition = ""; }, 850);
+  }
+  function scheduleZoomReset() {          // ten seconds after the last pinch, drift back out
+    if (zoomTimer) clearTimeout(zoomTimer);
+    zoomTimer = setTimeout(resetZoom, 10000);
+  }
+
   function buildZenithField() {
     const r = rng(4242 + Math.round(state.weather.cloud));
     const cov = state.weather.cloud;
-    const n = Math.round(4 + cov / 5);
     zfield = [];
+    if (cov <= 0) return;   // forecast says clear: look up and there is nothing but blue sky
+    const n = Math.round(4 + cov / 5);
     const bandT = H * 0.28, bandB = H * 0.62;
     const heavy = cov >= 85;
     // at heavy cover, an unbroken deck of big flat cumuli owns the sky first
@@ -645,6 +667,52 @@
       });
     ctx.globalAlpha = clamp(alpha, 0, 1);
     ctx.drawImage(spr, cx - (wb / 2 + padX), cy - padTop, wb + padX * 2, padTop + padBot);
+    ctx.globalAlpha = 1;
+  }
+  // the verse rides its own cloud: an OPAQUE body sized to fully cover the text box (coverW x coverH),
+  // so the words are never spotty or half off the white. Cauliflower bumps ride the top for cloud form.
+  function paintVerseCloud(g2, cx, cy, coverW, coverH, seed, night) {
+    const r = rng(seed);
+    const mx = coverH * 0.34, my = coverH * 0.16;      // solid margin around the text box
+    const bw = coverW + mx * 2, bh = coverH + my * 2;
+    const left = cx - bw / 2, top = cy - bh / 2;
+    const rad = Math.min(mx, my * 2.2, bh * 0.4);       // corner radius never bites into the text box
+    g2.save();
+    g2.beginPath();
+    g2.roundRect(left, top, bw, bh, rad);   // full covering body — the whole text box is opaque
+    const bumps = Math.max(3, Math.round(bw / (bh * 0.62)));
+    for (let i = 0; i <= bumps; i++) {
+      const t = i / bumps;
+      const bx = left + bw * (0.05 + t * 0.9);
+      const brad = bh * (0.3 + r() * 0.12) * (1 - Math.abs(t - 0.5) * 0.26);
+      const by = top + bh * 0.16 + (r() - 0.5) * bh * 0.06;
+      g2.moveTo(bx + brad, by); g2.arc(bx, by, brad, 0, 6.2832);
+    }
+    g2.moveTo(left + bh * 0.36, cy + bh * 0.06); g2.arc(left + bh * 0.2, cy + bh * 0.06, bh * 0.36, 0, 6.2832);
+    g2.moveTo(cx + bw / 2 - bh * 0.2 + bh * 0.36, cy + bh * 0.06); g2.arc(cx + bw / 2 - bh * 0.2, cy + bh * 0.06, bh * 0.36, 0, 6.2832);
+    g2.fillStyle = night ? "rgba(230,235,244,0.98)" : "rgba(253,254,252,0.98)";
+    g2.fill();
+    g2.clip();
+    const g = g2.createLinearGradient(0, top, 0, top + bh);
+    g.addColorStop(0, "rgba(255,255,255,0.85)");
+    g.addColorStop(0.78, "rgba(255,255,255,0)");   // keep the text zone bright; shade only the very base
+    g.addColorStop(1, night ? "rgba(120,134,160,0.34)" : "rgba(196,206,214,0.38)");
+    g2.fillStyle = g; g2.fillRect(left - bh, top - bh, bw + bh * 2, bh * 3);
+    const hl = g2.createRadialGradient(cx - bw * 0.2, top + bh * 0.32, 4, cx - bw * 0.2, top + bh * 0.32, bw * 0.46);
+    hl.addColorStop(0, night ? "rgba(246,248,254,0.4)" : "rgba(255,252,240,0.55)");
+    hl.addColorStop(1, "rgba(255,255,255,0)");
+    g2.fillStyle = hl; g2.fillRect(left - bh, top - bh, bw + bh * 2, bh * 3);
+    g2.restore();
+  }
+  function drawVerseCloud(cx, cy, coverW, coverH, seed, alpha, night) {
+    const cw = Math.round(coverW / 8) * 8, ch = Math.round(coverH / 8) * 8;
+    const padX = ch * 0.9, padY = ch * 0.85;            // sprite margin for bumps + soft edge
+    const spr = sprite("verse:" + seed + ":" + cw + ":" + ch + ":" + (night ? 1 : 0),
+      cw + padX * 2, ch + padY * 2, (g2) => {
+        paintVerseCloud(g2, cw / 2 + padX, ch / 2 + padY, cw, ch, seed, night);
+      });
+    ctx.globalAlpha = clamp(alpha, 0, 1);
+    ctx.drawImage(spr, cx - (cw / 2 + padX), cy - (ch / 2 + padY));
     ctx.globalAlpha = 1;
   }
   function drawCirrus(cx, cy, sc, seed, alpha) {
@@ -938,6 +1006,7 @@
     const w = L.willow; if (!w) return;
     const s = Math.max(0.7, w.h / 220);
     const nest = { x: w.x + w.h * 0.24, y: w.y - w.h * 0.52 };
+    nestHit = { x: nest.x, y: nest.y, r: Math.max(34, s * 18) };   // tap the nest to open the tour
     GE.drawNest(ctx, nest.x, nest.y, s * 10, 21, P);
     const tl = t % 40;
     const feeding = tl >= 15.5 && tl < 24;
@@ -1044,7 +1113,7 @@
     }
   }
 
-  let boatDir = 1, boatModel = 0, boatHit = null;
+  let boatDir = 1, boatModel = 0, boatHit = null, nestHit = null;
   function drawBoat() {
     if (motionOn() && !document.hidden) {
       state.boatP += boatDir * (T - lastTs) * (0.9 + windAmp() * 0.5) / 90000;
@@ -1210,9 +1279,14 @@
     const a = clamp(Math.min(p / 0.1, (1 - p) / 0.1, 1), 0, 1);
     if (a <= 0.01) return;
     const nightMode = sunAltitude() <= 0.09;
-    // the verse rides one opaque cumulus, shape seeded per verse
-    const block = sky.lines.length * sky.lh;
-    drawCumulus(cxp, yTop + block * 0.38, sky.tw * 1.1, Math.max(block * 1.14, sky.fs * 2.4), sky.cseed || 7, a, nightMode);
+    // the verse rides one opaque cloud, sized so every line and the reference sit on solid white.
+    // font math: text runs from the first line's caps down past the gold reference line.
+    const nL = sky.lines.length;
+    const boxTop = yTop - sky.fs * 0.82;
+    const boxBot = yTop + (nL - 1) * sky.lh + sky.fs * 1.55;
+    const coverW = sky.tw + sky.fs * 0.9;
+    const coverH = boxBot - boxTop;
+    drawVerseCloud(cxp, (boxTop + boxBot) / 2, coverW, coverH, sky.cseed || 7, a, nightMode);
     ctx.save();
     ctx.globalAlpha = a;
     ctx.textAlign = "center";
@@ -1771,31 +1845,80 @@
     return id;
   }
 
+  // an interactive walk: each step spotlights a real control in place, or teaches a gesture
   const TOUR = [
-    "Welcome to her Secret Garden. Everything here is alive: the sky, the light, and the weather all follow the real sky over the town named at the top.",
-    "Scripture drifts by on the clouds. Tap anywhere in the sky for a new verse, or tap the quote-mark button to write words of your own into the rotation.",
-    "Pull down on the garden, gently, like drawing back a curtain. You will look straight up into today's clouds — as many as are truly overhead right now.",
-    "While looking up, tap twice quickly. The clouds part and slide away, with a reminder of the One who commands them. They drift back on their own.",
-    "Drag left or right to stroll the garden. There is more of it on either side — the willow, the pond, whatever planted itself beyond the edges.",
-    "The My Garden button opens the scenes: five gardens, a Catskill evening, and a creator for making your own. You can also set rolling hills or Catskill mountains beyond any garden.",
-    "The gold Hourly sky button is the weather book: rain hour by hour, wind, and a live rain map centered on your town with a little pin where you are.",
-    "The sailboat button turns the garden into the river. In sailing mode the gold moves to Routes — plan a voyage stop by stop, or a road trip that names every town and its sky along the way. Star the places you love to keep them.",
-    "The compass follows the phone in your hand. Switch to Star finder and it shows which constellations are up right now, drawn right on the dial, with the one you are facing previewed below.",
-    "Tap the town name any time to move the garden somewhere else. Everything refreshes by itself — just come back at dusk sometime. The fireflies will be waiting."
+    { sel: null, title: "Her Secret Garden", body: "Everything here is alive — the sky, the light, and the weather all follow the real sky over the town at the top. Here is a quick walk through it." },
+    { sel: "#loc-chip", title: "Where she is", body: "Tap the town name to move the whole garden anywhere. Everything refreshes to that place's real sky." },
+    { sel: "#temp-link", title: "Today's sky", body: "The live temperature and conditions right now. Tap it to open the forecast on Google." },
+    { sel: null, title: "Scripture on the clouds", body: "A verse drifts across the sky on its own white cloud. Tap anywhere in the sky for a new one — or pause and step it with the buttons up there." },
+    { sel: "#open-hours", title: "Hourly sky", body: "The weather book: rain, temperature, and wind hour by hour — for her town and one more place she picks." },
+    { sel: "#open-daily", title: "Ten-day forecast", body: "New. The whole week ahead and more. Tap any day for feels-like, wind, UV, sunrise, sunset, and that night's moon." },
+    { sel: "#open-radar", title: "Rain radar", body: "A live rain map centered on her town, a little pin where she is. Drag it to look around the region." },
+    { sel: "#open-scenes", title: "Gardens & scenes", body: "Five gardens, a Catskill evening, and a maker for her own. While planting, tuck the tray away with its chevron to plant right up at the front." },
+    { sel: "#sail-toggle", title: "The river", body: "Turn the garden into a river with a sailing sloop. In sailing mode a Routes planner appears — plan a voyage, or a road trip that names every town and its sky." },
+    { sel: "#open-compass", title: "Compass & stars", body: "The rose follows the phone in her hand. Switch to the star finder to see which constellations are overhead right now." },
+    { sel: "#open-verses", title: "Her own verses", body: "Write any words, or a verse of her own, and they join the ones drifting through the sky." },
+    { sel: "#open-about", title: "Settings & this tour", body: "Location, sky time, and preferences live here — and the “Show the tour” button brings this walk back any time." },
+    { sel: null, title: "Look up", body: "Pull the garden down gently, like a curtain, to look straight up into today's real clouds. On a clear forecast it is nothing but blue sky. Double-tap up there to part the clouds." },
+    { sel: null, title: "Lean in", body: "Pinch with two fingers to zoom up to 2× and study the scene. It drifts gently back out on its own after a few seconds." },
+    { sel: null, title: "The robin's nest", body: "See the robin's nest up in the willow? Tap it any time to walk this tour again. Enjoy the garden." }
   ];
-  let tourIdx = 0;
-  function renderTour() {
-    el("tour-step").textContent = TOUR[tourIdx];
-    el("tour-back").style.visibility = tourIdx === 0 ? "hidden" : "visible";
-    el("tour-next").textContent = tourIdx === TOUR.length - 1 ? "Done" : "Next";
-    const dots = el("tour-dots"); dots.innerHTML = "";
-    TOUR.forEach((_, i) => {
-      const d = document.createElement("span");
-      d.className = "tdot" + (i === tourIdx ? " on" : "");
-      dots.appendChild(d);
-    });
+  let tourIdx = 0, coachTimer = 0;
+  function coachTarget(step) { return step.sel ? document.querySelector(step.sel) : null; }
+  function positionCoach(step, tries) {
+    clearTimeout(coachTimer);
+    const spot = el("coach-spot"), card = el("coach-card"), t = coachTarget(step);
+    card.classList.remove("above", "below", "mid");
+    if (t) {
+      const r = t.getBoundingClientRect();
+      if ((r.width < 4 || r.height < 4) && (tries || 0) < 24) {   // control still animating open — wait for layout
+        coachTimer = setTimeout(() => positionCoach(step, (tries || 0) + 1), 40);
+        return;
+      }
+      const p = 8;
+      spot.classList.remove("bare");
+      spot.style.left = (r.left - p) + "px"; spot.style.top = (r.top - p) + "px";
+      spot.style.width = (r.width + p * 2) + "px"; spot.style.height = (r.height + p * 2) + "px";
+      if (r.top < window.innerHeight * 0.5) { card.classList.add("below"); card.style.top = (r.bottom + 14) + "px"; card.style.bottom = "auto"; }
+      else { card.classList.add("above"); card.style.bottom = (window.innerHeight - r.top + 14) + "px"; card.style.top = "auto"; }
+    } else {
+      spot.classList.add("bare");
+      spot.style.left = "50%"; spot.style.top = "50%"; spot.style.width = "0px"; spot.style.height = "0px";
+      card.classList.add("mid"); card.style.top = "50%"; card.style.bottom = "auto";
+    }
   }
-  function openTour() { tourIdx = 0; renderTour(); openSheet("tour"); }
+  function renderTour() {
+    const step = TOUR[tourIdx];
+    closeSheet();                                   // clear any open sheet so the real control shows
+    el("drawer").classList.remove("closed");        // and the drawer is open where its buttons live
+    el("drawer-handle").setAttribute("aria-expanded", "true");
+    camTarget = 0;                                  // come back down from any look-up
+    el("coach-count").textContent = (tourIdx + 1) + " of " + TOUR.length;
+    el("coach-title").textContent = step.title;
+    el("coach-body").textContent = step.body;
+    el("coach-back").style.visibility = tourIdx === 0 ? "hidden" : "visible";
+    el("coach-next").textContent = tourIdx === TOUR.length - 1 ? "Done" : "Next";
+    const dots = el("coach-dots"); dots.innerHTML = "";
+    TOUR.forEach((_, i) => { const d = document.createElement("span"); d.className = "tdot" + (i === tourIdx ? " on" : ""); dots.appendChild(d); });
+    positionCoach(step);
+  }
+  let coachOpen = false;
+  function openTour() {
+    tourIdx = 0; coachOpen = true;
+    const c = el("coach");
+    c.hidden = false;
+    renderTour();
+    void c.offsetWidth;                 // reflow so the fade-in transition runs (no rAF dependency)
+    c.classList.add("show");
+  }
+  function closeTour() {
+    coachOpen = false;
+    clearTimeout(coachTimer);
+    const c = el("coach");
+    c.classList.remove("show");
+    setTimeout(() => { if (!coachOpen) c.hidden = true; }, 260);   // guard against a quick re-open
+  }
+  function tourStep(d) { const n = tourIdx + d; if (n < 0) return; if (n >= TOUR.length) { closeTour(); return; } tourIdx = n; renderTour(); }
 
   // ---------- garden designer: tap to plant ----------
   const PLACE_KINDS = [
@@ -2490,8 +2613,10 @@
       toast(b.dataset.v === "mountains" ? "The Catskills rise beyond the garden" : "Rolling hills beyond the garden");
     });
     el("open-tour").onclick = () => { closeSheet(); openTour(); };
-    el("tour-next").onclick = () => { if (tourIdx >= TOUR.length - 1) { closeSheet(); } else { tourIdx++; renderTour(); } };
-    el("tour-back").onclick = () => { if (tourIdx > 0) { tourIdx--; renderTour(); } };
+    el("coach-next").onclick = () => tourStep(1);
+    el("coach-back").onclick = () => tourStep(-1);
+    el("coach-skip").onclick = closeTour;
+    window.addEventListener("resize", () => { if (!el("coach").hidden) positionCoach(TOUR[tourIdx]); });
     el("open-compass").onclick = openCompass;
     window.addEventListener("deviceorientationabsolute", onHeading);
     window.addEventListener("deviceorientation", onHeading);
@@ -2510,11 +2635,30 @@
     let tapTimer = null, lastTap = 0;
     stage.addEventListener("pointerdown", e => {
       if (e.target !== stage) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        dragY = null; dragMoved = false; dragAxis = null;   // a second finger means pinch, not drag
+        const p = [...pointers.values()];
+        pinchStartDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1;
+        pinchStartScale = zoomScale;
+        pinchOx = (p[0].x + p[1].x) / 2; pinchOy = (p[0].y + p[1].y) / 2;
+        cv.style.transition = ""; pinching = true;
+        if (zoomTimer) { clearTimeout(zoomTimer); zoomTimer = null; }
+        return;
+      }
+      if (pointers.size > 2) return;
       dragY = e.clientY; dragX0 = e.clientX; dragMoved = false; dragAxis = null;
       camAt = cam; panAt = panX;
       stage.setPointerCapture(e.pointerId);        // keep the drag even when the finger wanders
     });
     stage.addEventListener("pointermove", e => {
+      if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinching && pointers.size >= 2) {
+        const p = [...pointers.values()];
+        const dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+        applyZoom(clamp(pinchStartScale * (dist / pinchStartDist), 1, 2), pinchOx, pinchOy);
+        return;
+      }
       if (dragY === null) return;
       const dy = e.clientY - dragY, dx = e.clientX - dragX0;
       if (!dragAxis && (Math.abs(dy) > 10 || Math.abs(dx) > 10)) {
@@ -2525,6 +2669,13 @@
       else if (dragAxis === "h" && cam < 0.3) panX = clamp(panAt - dx, -W * 0.35, W * 0.35);
     });
     stage.addEventListener("pointerup", e => {
+      const wasPinching = pinching;
+      pointers.delete(e.pointerId);
+      if (wasPinching) {
+        if (pointers.size < 2) { pinching = false; if (zoomScale > 1.01) scheduleZoomReset(); else resetZoom(); }
+        dragY = null;
+        return;               // don't treat the pinch as a tap
+      }
       if (dragY === null) return;
       const wasDrag = dragMoved, axis = dragAxis;
       dragY = null; dragMoved = false; dragAxis = null;
@@ -2562,6 +2713,10 @@
           renderRoute(); renderTrip(); renderFavs(); openSheet("route");
           return;
         }
+        if (!state.sail.on && nestHit && cam < 0.3 && Math.hypot((x + panX) - nestHit.x, y - nestHit.y) < nestHit.r) {
+          openTour();   // tap the robin's nest to walk the tour again
+          return;
+        }
         if (y < horizonY) {
           const xw = x + panX;
           for (let ci = clouds.length - 1; ci >= 0; ci--) {
@@ -2575,7 +2730,11 @@
         }
       }, 300);
     });
-    stage.addEventListener("pointercancel", () => { dragY = null; dragMoved = false; dragAxis = null; });
+    stage.addEventListener("pointercancel", e => {
+      pointers.delete(e.pointerId);
+      if (pinching && pointers.size < 2) { pinching = false; if (zoomScale > 1.01) scheduleZoomReset(); else resetZoom(); }
+      dragY = null; dragMoved = false; dragAxis = null;
+    });
   }
 
   function registerSW() {

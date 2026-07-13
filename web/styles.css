@@ -835,6 +835,48 @@ button.chip-info:hover { border-color: var(--line-warm); background: rgba(255, 2
 .tdot { width: 7px; height: 7px; border-radius: 50%; background: rgba(40, 60, 30, 0.18); transition: background 0.2s var(--ease), transform 0.2s var(--ease); }
 .tdot.on { background: var(--honey-deep); transform: scale(1.3); }
 
+/* larger, easy-to-find "Show the tour" button in settings */
+.tour-btn {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  width: 100%; margin-top: 10px; min-height: 54px;
+  font-size: 1.05rem; font-weight: 600;
+  color: var(--honey-deep); border-color: var(--line-warm);
+  background: rgba(216, 178, 106, 0.14);
+}
+.tour-btn:hover { background: rgba(216, 178, 106, 0.22); }
+.tour-btn svg { flex: 0 0 auto; }
+
+/* ---------- interactive tour: spotlight a real control, teach it in place ---------- */
+.coach { position: fixed; inset: 0; z-index: 70; opacity: 0; transition: opacity 0.25s var(--ease); }
+.coach.show { opacity: 1; }
+.coach[hidden] { display: none; }
+.coach-spot {
+  position: fixed; left: 50%; top: 50%; width: 0; height: 0;
+  border-radius: 16px; border: 2px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 0 9999px rgba(20, 30, 16, 0.62), 0 0 22px 4px rgba(216, 178, 106, 0.45);
+  transition: left 0.34s var(--ease), top 0.34s var(--ease), width 0.34s var(--ease), height 0.34s var(--ease);
+  pointer-events: none;
+}
+.coach-spot.bare { border-color: transparent; box-shadow: 0 0 0 9999px rgba(20, 30, 16, 0.62); }
+.coach-card {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  width: min(344px, calc(100vw - 26px));
+  background: var(--panel-strong); border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 20px; padding: 18px 20px calc(16px + var(--safe-b));
+  backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: 0 22px 54px -22px rgba(30, 44, 20, 0.7);
+  pointer-events: auto;
+}
+.coach-card.mid { transform: translate(-50%, -50%); }
+.coach-count { font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--honey-deep); font-weight: 700; margin-bottom: 7px; }
+.coach-card h3 { font-family: var(--font-heading); font-weight: 600; font-size: 1.3rem; color: var(--ink); margin-bottom: 7px; }
+.coach-text { font-size: 0.95rem; line-height: 1.5; color: var(--ink-soft); text-wrap: pretty; }
+.coach-dots { margin: 15px 0 14px; flex-wrap: wrap; }
+.coach-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.coach-nav { display: flex; gap: 8px; }
+.coach-skip { color: var(--ink-muted); padding-left: 4px; padding-right: 4px; }
+@media (prefers-reduced-motion: reduce) { .coach, .coach-spot { transition: none; } }
+
 /* ---------- collapsible drawer with the 2x controls ---------- */
 .drawer {
   display: flex;
