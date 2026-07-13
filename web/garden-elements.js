@@ -253,13 +253,25 @@
     ctx.bezierCurveTo(x + h * 0.028, y - h * 0.3, x + h * 0.03, y - h * 0.18, x + h * 0.065, y);
     ctx.closePath(); ctx.fill();
     var sway = Math.sin(o.t * 0.45 + o.seed * 2) * 2 * wind;
-    var i, jx, jy;
-    for (i = 0; i < 5; i++) { jx = (r() - 0.5) * R * 0.3; jy = (r() - 0.5) * R * 0.2;
-      ctx.fillStyle = F(FOL[0], P); E(ctx, cx + (i - 2) * R * 0.42 + jx, cy + R * 0.28 + jy, R * 0.42, R * 0.34); ctx.fill(); }
-    for (i = 0; i < 4; i++) { jx = (r() - 0.5) * R * 0.3; jy = (r() - 0.5) * R * 0.2;
-      ctx.fillStyle = F(FOL[1], P); E(ctx, cx + (i - 1.5) * R * 0.48 + jx + sway * 0.5, cy - R * 0.06 + jy, R * 0.46, R * 0.36); ctx.fill(); }
-    for (i = 0; i < 3; i++) { jx = (r() - 0.5) * R * 0.25;
-      ctx.fillStyle = hexA(F(FOL[2], P), 0.95); E(ctx, cx + (i - 1) * R * 0.44 + jx + sway, cy - R * 0.44, R * 0.36, R * 0.28); ctx.fill(); }
+    // organic canopy: many overlapping leaf-clumps at varied angles and radii, a ragged
+    // edge and two low reaching lobes, painted back(dark)-to-front(lit) for depth
+    var blobs = [], i, bl, ang, rad;
+    for (i = 0; i < 16; i++) {
+      ang = r() * 6.2832;
+      rad = R * (0.18 + Math.pow(r(), 0.7) * 0.86);            // denser center, frayed rim
+      var by = cy + Math.sin(ang) * rad * 0.8 - R * 0.05;
+      blobs.push({ x: cx + Math.cos(ang) * rad * 1.06, y: by, r: R * (0.25 + r() * 0.22),
+        tone: by < cy - R * 0.16 ? 2 : (by > cy + R * 0.14 ? 0 : 1) });
+    }
+    blobs.push({ x: cx - R * (0.72 + r() * 0.18), y: cy + R * (0.22 + r() * 0.16), r: R * 0.33, tone: 0 });
+    blobs.push({ x: cx + R * (0.64 + r() * 0.18), y: cy + R * (0.08 + r() * 0.18), r: R * 0.3, tone: 1 });
+    blobs.sort(function (a, b) { return a.tone - b.tone; });
+    for (i = 0; i < blobs.length; i++) {
+      bl = blobs[i];
+      var sw = bl.tone === 2 ? sway : (bl.tone === 1 ? sway * 0.5 : 0);
+      ctx.fillStyle = bl.tone === 2 ? hexA(F(FOL[2], P), 0.95) : F(FOL[bl.tone], P);
+      E(ctx, bl.x + sw, bl.y, bl.r, bl.r * 0.82); ctx.fill();
+    }
     ctx.fillStyle = 'rgba(34,51,27,0.14)';
     E(ctx, cx, cy + R * 0.5, R * 0.95, R * 0.18); ctx.fill();
   }};
@@ -339,7 +351,7 @@
   var flowers = {};
 
   flowers.tulip = { footprint: 0.14, draw: function (ctx, o) {
-    var r = rng(o.seed), P = o.P, h = o.h, x = o.x, y = o.baseY, wind = o.wind == null ? 1 : o.wind;
+    var r = rng(o.seed), P = o.P, h = o.h * 0.82, x = o.x, y = o.baseY, wind = o.wind == null ? 1 : o.wind;
     var sway = Math.sin(o.t * 1.1 + o.seed * 3) * h * 0.04 * wind;
     var tx = x + (r() - 0.5) * h * 0.14 + sway, ty = y - h;
     stem(ctx, x, y, tx, ty + h * 0.12, P, Math.max(1.2, h * 0.03));

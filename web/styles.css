@@ -301,6 +301,7 @@ a.chip-info.tap:hover { border-color: var(--line-warm); background: rgba(255, 25
   padding: 26px clamp(20px, 4vw, 34px) calc(32px + var(--safe-b));
   box-shadow: 0 -30px 70px -38px rgba(40, 60, 30, 0.5);
   transition: transform 0.5s var(--ease);
+  touch-action: manipulation;   /* scroll + pinch-to-zoom the data; no double-tap zoom */
 }
 .sheet.open { transform: translate(-50%, 0); }
 
@@ -494,6 +495,48 @@ p.about.credit a { color: var(--honey-deep); text-decoration: none; }
 .dd-v small { font-weight: 500; color: var(--ink-muted); font-size: 0.78rem; }
 .daily-google { display: inline-block; margin-top: 4px; font-size: 0.82rem; font-weight: 600; color: var(--honey-deep); text-decoration: none; }
 .daily-google:hover { color: var(--honey); }
+
+/* +50% data type on the sheets she actually reads — hourly, radar, ten-day — for easy reading with glasses */
+#sheet-hours .hour-row { grid-template-columns: 74px 1fr auto; gap: 14px; font-size: 1.26rem; }
+#sheet-hours .hour-row .hlab { font-size: 1.12rem; }
+#sheet-hours .hour-row .hval small { font-size: 1.0rem; }
+#sheet-hours .hbar { height: 11px; }
+#sheet-hours .seg button { font-size: 1.02rem; }
+
+#sheet-radar .sat-row span { font-size: 1.2rem; }
+#sheet-radar #radar-toggle { font-size: 1.05rem; }
+#sheet-radar .hour-row { grid-template-columns: 74px 1fr auto; gap: 14px; font-size: 1.24rem; }
+#sheet-radar .hour-row .hlab { font-size: 1.1rem; }
+#sheet-radar .hour-row .hval small { font-size: 1.0rem; }
+
+#sheet-daily .daily-place { font-size: 1.12rem; }
+#sheet-daily .day-row { grid-template-columns: 4.4rem 2rem 3.5rem 1fr 16px; gap: 11px; padding: 12px 4px; }
+#sheet-daily .day-name b { font-size: 1.35rem; }
+#sheet-daily .day-name small { font-size: 1.0rem; }
+#sheet-daily .day-glyph { font-size: 1.7rem; }
+#sheet-daily .day-pop { font-size: 1.05rem; }
+#sheet-daily .day-range { grid-template-columns: 2.8em 1fr 2.8em; }
+#sheet-daily .day-range i { font-size: 1.22rem; }
+#sheet-daily .day-caret svg { width: 18px; height: 18px; }
+#sheet-daily .dd-k { font-size: 0.92rem; }
+#sheet-daily .dd-v { font-size: 1.34rem; }
+#sheet-daily .dd-v small { font-size: 1.1rem; }
+
+/* sun & moon detail sheet */
+.sky-hero { font-size: 3.2rem; line-height: 1; text-align: center; margin: 2px 0 16px; }
+#sheet-sky .dd-grid { gap: 8px 20px; }
+#sheet-sky .dd-v { font-size: 1.2rem; }
+#sheet-sky .dd-k { font-size: 0.78rem; }
+#sky-note { margin-top: 14px; }
+
+/* routes: a little bolder and larger so the legs, times, and towns read easily */
+#sheet-route .stop-main b { font-size: 1.04rem; }
+#sheet-route .stop-main small { font-weight: 600; font-size: 0.84rem; color: var(--ink-soft); }
+#sheet-route .nextleg { font-size: 0.94rem; font-weight: 500; }
+#sheet-route .trip-row { font-size: 0.94rem; }
+#sheet-route .trip-row .hlab { font-weight: 700; font-size: 0.8rem; }
+#sheet-route .trip-row b { font-weight: 700; }
+#sheet-route .trip-row .hval { font-weight: 700; }
 @media (prefers-reduced-motion: reduce) {
   .day-caret, .day-row { transition: none; }
 }
@@ -785,12 +828,12 @@ button.chip-info:hover { border-color: var(--line-warm); background: rgba(255, 2
   border-radius: 16px;
   border: 1px solid var(--line);
   scrollbar-width: none;
-  touch-action: pan-x pan-y;
+  touch-action: pan-x pan-y;   /* one finger pans; two-finger pinch is handled in JS for a 5x zoom */
 }
 .map-view::-webkit-scrollbar { display: none; }
 .map-wrap {
   position: relative;
-  width: 165%;
+  width: 165%;   /* JS grows this up to ~5x the view on a two-finger pinch */
   aspect-ratio: 1;
 }
 .map-grid { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; }

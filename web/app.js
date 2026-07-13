@@ -276,7 +276,7 @@
       if (th.placed) for (const p of th.placed) {
         const px = (-0.35 + p.nx * 1.7) * W, py = horizonY + p.ny * G;
         const sc = 0.42 + 0.78 * p.ny;
-        if (p.t === "tree") L.trees.push({ kind: p.kind, x: px, y: py, h: G * 0.95 * sc, seed: p.seed });
+        if (p.t === "tree") L.trees.push({ kind: p.kind, x: px, y: py, h: G * 0.95 * sc * (p.size || 1), seed: p.seed });
         else if (p.t === "bush") L.flowers.push({ kind: "bush", x: px, y: py, h: G * 0.2 * sc, seed: p.seed });
         else L.flowers.push({ kind: p.kind, x: px, y: py, h: G * 0.26 * sc, seed: p.seed });
       }
@@ -497,20 +497,26 @@
     ctx.globalAlpha = 1;
   }
 
+  let sunHit = null, moonHit = null;   // tap targets, in scene coords, set when the disc is drawn
   function drawCelestial() {
     const alt = sunAltitude();
     const lookUp = 1 - smooth(cam * 1.4);           // sun and moon bow out as you look overhead
     const sunA = clamp(alt / 0.12, 0, 1) * lookUp;
     const moonA = clamp(1 - alt / 0.14, 0, 1) * 0.92 * lookUp;
+    sunHit = moonHit = null;
     if (moonA > 0.02) {
       const nf = nightFrac();
       const mx = celestialX(nf), my = horizonY - Math.sin(Math.PI * nf) * horizonY * 0.7 + 12 - H * 0.02 * smooth(Math.sin(Math.PI * nf) * 2);
-      drawMoon(mx, my, Math.max(14, U * 0.05), moonA);
+      const mr = Math.max(14, U * 0.05);
+      drawMoon(mx, my, mr, moonA);
+      moonHit = { x: mx, y: my, r: Math.max(40, mr * 1.8) };
     }
     if (sunA > 0.02) {
       const df = dayFrac();
       const sx = celestialX(df), sy = horizonY - Math.sin(Math.PI * df) * horizonY * 0.74 + 8 - H * 0.02 * smooth(Math.sin(Math.PI * df) * 2);
-      drawSun(sx, sy, Math.max(16, U * 0.055), sunA);
+      const sr = Math.max(16, U * 0.055);
+      drawSun(sx, sy, sr, sunA);
+      sunHit = { x: sx, y: sy, r: Math.max(44, sr * 1.8) };
     }
   }
 
@@ -554,6 +560,11 @@
     }
   }
   function partClouds() {
+    if (Date.now() < clearUntil) {    // already parted — a second double-tap draws them back
+      clearUntil = 0;
+      toast("The clouds return");
+      return;
+    }
     clearUntil = Date.now() + 90000;
     const pool = VERSES.filter(v => v.moods.indexOf("storm") >= 0 || v.moods.indexOf("wind") >= 0);
     if (pool.length) setVerse(pool[Math.floor(Math.random() * pool.length)]);
@@ -690,6 +701,15 @@
     }
     g2.moveTo(left + bh * 0.36, cy + bh * 0.06); g2.arc(left + bh * 0.2, cy + bh * 0.06, bh * 0.36, 0, 6.2832);
     g2.moveTo(cx + bw / 2 - bh * 0.2 + bh * 0.36, cy + bh * 0.06); g2.arc(cx + bw / 2 - bh * 0.2, cy + bh * 0.06, bh * 0.36, 0, 6.2832);
+    // a gently uneven base — lobes hang just below the body so the bottom reads soft, not cut flat
+    const bb = Math.max(3, Math.round(bw / (bh * 0.85)));
+    for (let i = 0; i <= bb; i++) {
+      const t = i / bb;
+      const bx = left + bw * (0.08 + t * 0.84);
+      const brad = bh * (0.17 + r() * 0.11);
+      const by = top + bh - bh * (0.03 + r() * 0.05);   // centered at the base, hanging a little below it
+      g2.moveTo(bx + brad, by); g2.arc(bx, by, brad, 0, 6.2832);
+    }
     g2.fillStyle = night ? "rgba(230,235,244,0.98)" : "rgba(253,254,252,0.98)";
     g2.fill();
     g2.clip();
@@ -1041,13 +1061,51 @@
     if (pose) { pose.s = s * 0.62; pose.P = P; pose.blue = Math.floor(t / 40) % 2 === 1; GE.drawRobin(ctx, pose); }
   }
 
-  const bflies = [{ sd: 3, ox: 0.3, oy: 0.55 }, { sd: 8, ox: 0.7, oy: 0.62 }];
+  // butterflies fly a real path from bloom to bloom, rest on each a moment, then move on
+  let bflies = [];
+  function initButterflies() {
+    const n = perfTier ? 2 : 3, G = H - horizonY;
+    bflies = [];
+    for (let i = 0; i < n; i++) bflies.push({ sd: 3 + i * 5, x: W * (0.3 + i * 0.3), y: horizonY + G * (0.45 + i * 0.1), tx: 0, ty: 0, phase: "seek", timer: 0, flit: Math.random() * 6.28, spd: 0.9 + Math.random() * 0.5 });
+  }
+  function butterflyTarget() {
+    if (!L || !L.flowers || !L.flowers.length) return null;
+    const blooms = L.flowers.filter(f => f.kind !== "bush");
+    if (!blooms.length) return null;
+    const inView = blooms.filter(f => f.x > panX - 40 && f.x < panX + W + 40);
+    const pool = inView.length ? inView : blooms;
+    let best = null;                                   // sample a few, favor the front (lowest) bloom
+    for (let k = 0; k < 5; k++) { const f = pool[Math.floor(Math.random() * pool.length)]; if (!best || f.y > best.y) best = f; }
+    return best;
+  }
   function drawButterflies(P, t) {
     if (isNight() || !motionOn()) return;
+    if (!bflies.length) initButterflies();
+    const dt = clamp((T - lastTs) / 16.7, 0, 3);
     for (const b of bflies) {
-      const x = W * (b.ox + Math.sin(t * 0.13 + b.sd) * 0.16);
-      const y = horizonY + (H - horizonY) * (b.oy + Math.sin(t * 0.23 + b.sd * 2) * 0.12) - Math.sin(t * 0.9 + b.sd) * 8;
-      GE.drawButterfly(ctx, { x: x, y: y, s: U * 0.045, seed: b.sd, t: t, P: P, tilt: Math.sin(t * 0.5 + b.sd) * 0.2 });
+      b.flit += 0.16 * dt;
+      if (b.phase === "seek") {
+        const f = butterflyTarget();
+        if (f) { b.tx = f.x + (Math.random() - 0.5) * f.h * 0.22; b.ty = f.y - f.h * 0.6; }
+        else { b.tx = clamp(b.x + (Math.random() - 0.5) * W * 0.4, panX, panX + W); b.ty = clamp(b.y + (Math.random() - 0.5) * 90, horizonY + 20, H - 16); }
+        b.phase = "fly";
+      }
+      const dx = b.tx - b.x, dy = b.ty - b.y, dist = Math.hypot(dx, dy) || 1;
+      let visiting = false;
+      if (b.phase === "fly") {
+        const step = Math.min(dist, b.spd * 2.4 * dt);
+        b.x += dx / dist * step + Math.cos(b.flit * 2) * 0.7 * dt;   // ease in with a fluttering wobble
+        b.y += dy / dist * step + Math.sin(b.flit * 3) * 0.5 * dt;
+        if (dist < 6) { b.phase = "visit"; b.timer = 90 + Math.random() * 160; }   // rest ~1.5–4s
+      } else {
+        visiting = true;                                             // hover and bob right at the bloom
+        b.x += Math.sin(b.flit * 1.6) * 0.5 * dt;
+        b.y += Math.sin(b.flit * 2.3) * 0.35 * dt;
+        b.timer -= dt;
+        if (b.timer <= 0) b.phase = "seek";
+      }
+      const flap = visiting ? 0.24 + Math.abs(Math.sin(b.flit * 0.8)) * 0.4 : 0.5 + Math.sin(b.flit * 6) * 0.5;
+      GE.drawButterfly(ctx, { x: b.x, y: b.y, s: U * 0.045, seed: b.sd, t: t, P: P, tilt: Math.sin(b.flit) * 0.24 + (visiting ? 0.15 : 0), flap: flap });
     }
   }
 
@@ -1589,6 +1647,41 @@
     }
     grid.dataset.built = "us";
   }
+  // radar map: two fingers pinch to grow the map up to ~5x the view; one finger still pans it
+  function setupRadarZoom() {
+    const view = el("map-view"), wrap = el("map-wrap"); if (!view || !wrap) return;
+    const pts = new Map();
+    let startDist = 0, startZoom = 1, mz = 1;
+    function setZoom(z, midX, midY) {
+      z = clamp(z, 1, 3);                      // 165% base × 3 ≈ 5x the view
+      const prev = mz; mz = z;
+      wrap.style.width = (165 * mz).toFixed(1) + "%";
+      if (midX != null && prev > 0) {          // hold the pinched point steady while it grows
+        const rect = view.getBoundingClientRect(), lx = midX - rect.left, ly = midY - rect.top;
+        view.scrollLeft = (view.scrollLeft + lx) * (mz / prev) - lx;
+        view.scrollTop = (view.scrollTop + ly) * (mz / prev) - ly;
+      }
+      el("map-zoom-reset").style.display = mz > 1.02 ? "" : "none";
+    }
+    view.addEventListener("pointerdown", e => {
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) { const p = [...pts.values()]; startDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1; startZoom = mz; }
+    });
+    view.addEventListener("pointermove", e => {
+      if (!pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) {
+        const p = [...pts.values()], dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+        setZoom(startZoom * dist / startDist, (p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2);
+        e.preventDefault();
+      }
+    });
+    const end = e => pts.delete(e.pointerId);
+    view.addEventListener("pointerup", end);
+    view.addEventListener("pointercancel", end);
+    el("map-zoom-reset").onclick = () => setZoom(1);
+    view.__resetZoom = () => setZoom(1);
+  }
   function updateSat() {
     const grid = el("map-grid"); if (!grid) return;
     if (grid.dataset.built !== "us") buildUsMap();
@@ -1752,6 +1845,41 @@
         if (open) { det.removeAttribute("hidden"); btn.setAttribute("aria-expanded", "true"); }
       };
     });
+  }
+
+  function fmtMin(min) {
+    let h = Math.floor((((min % 1440) + 1440) % 1440) / 60), m = Math.round(min % 60);
+    const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12;
+    return h + ":" + (m < 10 ? "0" : "") + m + " " + ap;
+  }
+  function openSky(which) {
+    const body = el("sky-body"), hero = el("sky-hero"), note = el("sky-note");
+    const cell = (k, v) => "<div><span class='dd-k'>" + k + "</span><span class='dd-v'>" + v + "</span></div>";
+    if (which === "sun") {
+      el("sky-title").innerHTML = "The <span class='em'>sun</span>";
+      hero.textContent = "☀️";
+      const sr = state.sun.sunrise, ss = state.sun.sunset;
+      const dl = (ss > sr ? ss - sr : (1440 - sr) + ss) / 60;
+      const uv = state.daily && state.daily.uv && state.daily.uv[0] != null ? Math.round(state.daily.uv[0]) : null;
+      const alt = sunAltitude();
+      let h = cell("Sunrise", fmtMin(sr)) + cell("Sunset", fmtMin(ss)) + cell("Daylight", fmtDur(dl));
+      if (uv != null) h += cell("UV index today", uv + " <small>" + uvText(uv) + "</small>");
+      h += cell("Right now", alt <= 0.02 ? "below the horizon" : alt > 0.55 ? "high overhead" : alt > 0.2 ? "climbing the sky" : "low in the sky");
+      body.innerHTML = h;
+      note.textContent = "Sunrise and sunset are the real times over " + state.loc.place + " today.";
+    } else {
+      el("sky-title").innerHTML = "The <span class='em'>moon</span>";
+      const p = moonPhase();
+      hero.textContent = moonGlyph(p);
+      const illum = Math.round((1 - Math.cos(p * 2 * Math.PI)) / 2 * 100);
+      const toFull = (((0.5 - p) % 1) + 1) % 1, toNew = (((1 - p) % 1) + 1) % 1;
+      body.innerHTML = cell("Phase", moonName(p)) + cell("Illuminated", illum + "%") +
+        cell("Trend", p < 0.5 ? "waxing — growing" : "waning — shrinking") +
+        cell("Next full moon", Math.max(0, Math.round(toFull * 29.53)) + " days") +
+        cell("Next new moon", Math.max(0, Math.round(toNew * 29.53)) + " days");
+      note.textContent = "The moon phase is computed on the device and works offline.";
+    }
+    openSheet("sky");
   }
 
   let toastTimer = null;
@@ -1953,15 +2081,28 @@
       }
       wrap.appendChild(row);
     }
+    const pk = placing && PLACE_KINDS.find(p => p.k === placing.kind);
+    if (pk && pk.t === "tree") {                 // trees can be planted small, medium, or large
+      const row = document.createElement("div");
+      row.className = "place-group";
+      const lab = document.createElement("span"); lab.className = "place-label"; lab.textContent = "Size"; row.appendChild(lab);
+      [["Small", 0.68], ["Medium", 1], ["Large", 1.38]].forEach(sz => {
+        const b = document.createElement("button");
+        b.className = "chip" + (Math.abs((placing.size || 1) - sz[1]) < 0.01 ? " active" : "");
+        b.textContent = sz[0];
+        b.onclick = () => { placing.size = sz[1]; buildPlaceBar(); };
+        row.appendChild(b);
+      });
+      wrap.appendChild(row);
+    }
     const th = placingTheme();
     el("place-count").textContent = th && th.placed ? th.placed.length + " / 100" : "";
-    const pk = placing && PLACE_KINDS.find(p => p.k === placing.kind);
-    el("place-active").textContent = pk ? pk.n : "";
+    el("place-active").textContent = pk ? pk.n + (pk.t === "tree" ? " · " + (placing.size === 0.68 ? "small" : placing.size === 1.38 ? "large" : "medium") : "") : "";
   }
   function startPlacing(themeId) {
     state.themeId = "custom:" + themeId;
     persist(); buildThemeChips(); buildScene();
-    placing = { themeId: themeId, kind: "daisy" };
+    placing = { themeId: themeId, kind: "daisy", size: 1 };
     buildPlaceBar();
     el("placebar").style.display = "";
     el("placebar").classList.remove("min");
@@ -1989,7 +2130,7 @@
     } else {
       th.placed = th.placed || [];
       if (th.placed.length >= 100) { toast("The garden is full \u2014 one hundred plantings"); return; }
-      th.placed.push({ kind: pk.k, t: pk.t, nx: nx, ny: ny, seed: Math.floor(Math.random() * 9999) });
+      th.placed.push({ kind: pk.k, t: pk.t, nx: nx, ny: ny, seed: Math.floor(Math.random() * 9999), size: pk.t === "tree" ? (placing.size || 1) : 1 });
       el("place-count").textContent = th.placed.length + " / 100";
     }
     persist(); buildScene();
@@ -2285,6 +2426,13 @@
     if (h > 0) return h + "h " + (m < 10 ? "0" : "") + m + "m";
     return m + "m";
   }
+  function clockFromNow(hours) {   // wall-clock time this many hours from now (her device time)
+    const dt = new Date(Date.now() + hours * 3600000);
+    let hh = dt.getHours(); const mm = dt.getMinutes();
+    const ap = hh >= 12 ? "PM" : "AM"; hh = hh % 12 || 12;
+    const day = hours >= 24 ? " " + ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][dt.getDay()] : "";
+    return hh + ":" + (mm < 10 ? "0" : "") + mm + " " + ap + day;
+  }
   let openStopId = null;
   async function fetchStopWx(stop) {
     try {
@@ -2389,7 +2537,7 @@
     document.querySelectorAll("#speed-seg button").forEach(b => b.classList.toggle("on", +b.dataset.v === kn));
     if (!stops.length) { wrap.innerHTML = "<p class='empty-note'>Add harbors and towns along her way. Each stop carries its own hourly temperature and wind chart, plus course and sail time for every leg.</p>"; el("route-total").textContent = ""; return; }
     wrap.innerHTML = "";
-    let total = 0;
+    let total = 0, cumNm = 0;
     const curIdx = stops.findIndex(s => s.name === state.loc.place);
     let legA = null, legB = null;
     if (curIdx >= 0 && curIdx < stops.length - 1) { legA = stops[curIdx]; legB = stops[curIdx + 1]; }
@@ -2421,9 +2569,9 @@
       if (i > 0) {
         const p = stops[i - 1];
         const d = nm(haversine(p.lat, p.lon, s.lat, s.lon));
-        total += d;
+        total += d; cumNm += d;
         const brg = bearingDeg(p.lat, p.lon, s.lat, s.lon);
-        leg = d.toFixed(1) + " nm · " + Math.round(brg) + "° " + compassPt(brg) + " · " + fmtDur(d / kn) + " · ";
+        leg = d.toFixed(1) + " nm · " + Math.round(brg) + "° " + compassPt(brg) + " · " + fmtDur(d / kn) + " · arrive ~" + clockFromNow(cumNm / kn) + " · ";
       }
       sm.textContent = leg + (s.temp != null ? s.temp + "° · wind " + s.wind + " mph" : "fetching sky...");
       main.appendChild(b); main.appendChild(sm);
@@ -2466,7 +2614,7 @@
         requestAnimationFrame(() => drawStopChart(c, s));
       }
     });
-    el("route-total").textContent = stops.length > 1 ? "About " + total.toFixed(1) + " nautical miles end to end, roughly " + fmtDur(total / kn) + " under sail at " + kn + " kn." : "";
+    el("route-total").textContent = stops.length > 1 ? "About " + total.toFixed(1) + " nautical miles end to end, roughly " + fmtDur(total / kn) + " under sail at " + kn + " kn — arriving about " + clockFromNow(total / kn) + "." : "";
   }
   async function addStop() {
     const q = (el("stop-input").value || "").trim(); if (!q) return;
@@ -2577,7 +2725,7 @@
     };
     el("loc2-go").onclick = setLoc2;
     el("loc2-input").addEventListener("keydown", e => { if (e.key === "Enter") setLoc2(); });
-    el("open-radar").onclick = () => { renderHours(); const v = el("map-view"); if (v) v.__centered = false; updateSat(); openSheet("radar"); };
+    el("open-radar").onclick = () => { renderHours(); const v = el("map-view"); if (v) { v.__centered = false; if (v.__resetZoom) v.__resetZoom(); } updateSat(); openSheet("radar"); };
     document.querySelectorAll("#hours-tabs button").forEach(b => b.onclick = () => {
       document.querySelectorAll("#hours-tabs button").forEach(x => x.classList.toggle("on", x === b));
       el("hours-rain").style.display = b.dataset.t === "rain" ? "" : "none";
@@ -2590,6 +2738,7 @@
       r.classList.toggle("on");
       el("radar-toggle").textContent = r.classList.contains("on") ? "Rain radar on" : "Rain radar off";
     };
+    setupRadarZoom();
     el("open-verses").onclick = () => { renderCvList(); openSheet("verses"); };
     el("cv-save").onclick = saveCustomVerse;
     el("sail-toggle").onclick = () => setSailing(!state.sail.on);
@@ -2716,6 +2865,11 @@
         if (!state.sail.on && nestHit && cam < 0.3 && Math.hypot((x + panX) - nestHit.x, y - nestHit.y) < nestHit.r) {
           openTour();   // tap the robin's nest to walk the tour again
           return;
+        }
+        if (cam < 0.3) {
+          const sxp = x + panX;
+          if (sunHit && Math.hypot(sxp - sunHit.x, y - sunHit.y) < sunHit.r) { openSky("sun"); return; }
+          if (moonHit && Math.hypot(sxp - moonHit.x, y - moonHit.y) < moonHit.r) { openSky("moon"); return; }
         }
         if (y < horizonY) {
           const xw = x + panX;

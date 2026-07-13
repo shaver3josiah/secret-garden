@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Secret Garden</title>
 <meta name="description" content="A living garden and river that breathe with real weather, sky, and the moon, with scripture drifting through the clouds.">
 <meta name="theme-color" content="#E9F0E2">
@@ -184,20 +184,30 @@
   <a class="daily-google" id="daily-google" target="_blank" rel="noopener">See the ten days on Google Weather &#8599;</a>
 </section>
 
+<section class="sheet" id="sheet-sky" role="dialog" aria-label="Sun and moon">
+  <div class="sheet-head">
+    <h2 id="sky-title">The <span class="em">sky</span></h2>
+    <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <div class="sky-hero" id="sky-hero" aria-hidden="true"></div>
+  <div class="dd-grid" id="sky-body"></div>
+  <p class="about" id="sky-note"></p>
+</section>
+
 <section class="sheet" id="sheet-radar" role="dialog" aria-label="Rain radar map">
   <div class="sheet-head">
     <h2>Rain <span class="em">radar</span></h2>
     <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
   </div>
   <div class="map-view" id="map-view">
-    <div class="map-wrap">
+    <div class="map-wrap" id="map-wrap">
       <div class="map-grid" id="map-grid"></div>
       <span class="map-pin" aria-hidden="true"></span>
     </div>
   </div>
   <div class="sat-controls">
     <input type="range" id="sat-scrub" min="-6" max="0" value="0" step="1" aria-label="Radar frames back">
-    <div class="sat-row"><span id="sat-time">Latest radar</span><button class="chip" id="radar-toggle">Rain radar on</button></div>
+    <div class="sat-row"><span id="sat-time">Latest radar</span><button class="chip" id="map-zoom-reset" style="display:none">Reset zoom</button><button class="chip" id="radar-toggle">Rain radar on</button></div>
   </div>
   <div id="hours-cloud"></div>
   <p class="about credit">Map &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Radar by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>. Drag the map to look around.</p>

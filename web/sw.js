@@ -1,4 +1,4 @@
-const CACHE = "secret-garden-v17";
+const CACHE = "secret-garden-v18";
 const SHELL = [
   "./",
   "./index.html",
