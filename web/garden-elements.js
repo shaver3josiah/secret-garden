@@ -982,13 +982,14 @@
         flowersOut.push({ kind: fk, x: fx, y: fy, h: G * (0.2 + r() * 0.14) * sc(fy), seed: Math.floor(r() * 9999) });
       }
     }
-    // 3) grass infills every remaining gap (no clearance — it is the ground cover)
+    // 3) grass infills every remaining gap (no clearance — it is the ground cover):
+    //    short and dense so the ground reads lush without any single blade drawing the eye
     var grassOut = [];
-    var grassN = Math.round((50 + 130 * density) * Math.min(W, 1100) / 900);
+    var grassN = Math.round((120 + 300 * density) * Math.min(W, 1100) / 900);
     for (var gi = 0; gi < grassN; gi++) {
       var gx = r() * W, gy = horizon + G * (0.12 + r() * 0.88);
       if (inPond(gx, gy, 5)) continue;
-      grassOut.push({ x: gx, base: gy, len: G * (0.08 + r() * 0.16) * sc(gy), w: 0.8 + r() * 1.8, ph: r() * TAU, lean: (r() - 0.5) * 0.5 });
+      grassOut.push({ x: gx, base: gy, len: G * (0.035 + r() * 0.07) * sc(gy), w: 0.8 + r() * 1.4, ph: r() * TAU, lean: (r() - 0.5) * 0.5 });
     }
     return {
       W: W, H: H, horizon: horizon, seed: seed, pond: pd,

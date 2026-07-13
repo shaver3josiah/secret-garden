@@ -620,7 +620,7 @@
   }
   function runBind(a) {
     switch (a) {
-      case "radar": { renderHours(); const v = el("map-view"); if (v) { v.__centered = false; if (v.__resetZoom) v.__resetZoom(); } updateSat(); openSheet("radar"); return true; }
+      case "radar": { const v = el("map-view"); if (v && v.__resetZoom) v.__resetZoom(); openRadar(); return true; }
       case "daily": renderDaily(); if (!state.daily) fetchDaily(); openSheet("daily"); return true;
       case "hours": renderHours(); openSheet("hours"); return true;
       case "scenes": buildThemeChips(); document.querySelectorAll("#backdrop-seg button").forEach(b => b.classList.toggle("on", b.dataset.v === state.settings.backdrop)); openSheet("scenes"); return true;
@@ -1148,7 +1148,7 @@
     if (!bflies.length) initButterflies();
     const dt = clamp((T - lastTs) / 16.7, 0, 3);
     for (const b of bflies) {
-      b.flit += 0.11 * dt;
+      b.flit += 0.03 * dt;                                          // an unhurried wingbeat — about a quarter the old rate
       if (b.phase === "seek") {
         const f = butterflyTarget();
         if (f) { b.tx = f.x + (Math.random() - 0.5) * f.h * 0.22; b.ty = f.y - f.h * 0.6; }
@@ -1161,16 +1161,17 @@
         const step = Math.min(dist, b.spd * 1.7 * dt);
         b.x += dx / dist * step + Math.cos(b.flit * 2) * 0.5 * dt;   // ease in with a fluttering wobble
         b.y += dy / dist * step + Math.sin(b.flit * 3) * 0.36 * dt;
-        if (dist < 6) { b.phase = "visit"; b.timer = 130 + Math.random() * 200; }   // linger ~2–5.5s
+        if (dist < 6) { b.phase = "visit"; b.timer = 220 + Math.random() * 320; }   // settle a good long while
       } else {
-        visiting = true;                                             // hover and bob right at the bloom
-        b.x += Math.sin(b.flit * 1.6) * 0.5 * dt;
-        b.y += Math.sin(b.flit * 2.3) * 0.35 * dt;
+        visiting = true;                                            // settled on the bloom: barely a sway, wings near-closed
+        b.x += Math.sin(b.flit * 0.6) * 0.07 * dt;
+        b.y += Math.sin(b.flit * 0.9) * 0.05 * dt;
         b.timer -= dt;
         if (b.timer <= 0) b.phase = "seek";
       }
-      const flap = visiting ? 0.24 + Math.abs(Math.sin(b.flit * 0.8)) * 0.4 : 0.5 + Math.sin(b.flit * 6) * 0.5;
-      GE.drawButterfly(ctx, { x: b.x, y: b.y, s: U * 0.045, seed: b.sd, t: t, P: P, tilt: Math.sin(b.flit) * 0.24 + (visiting ? 0.15 : 0), flap: flap });
+      const flap = visiting ? 0.12 + (Math.sin(b.flit * 0.7) * 0.5 + 0.5) * 0.16 : 0.5 + Math.sin(b.flit * 6) * 0.5;
+      const tilt = visiting ? 0.12 + Math.sin(b.flit * 0.5) * 0.05 : Math.sin(b.flit) * 0.24;
+      GE.drawButterfly(ctx, { x: b.x, y: b.y, s: U * 0.045, seed: b.sd, t: t, P: P, tilt: tilt, flap: flap });
     }
   }
 
@@ -1428,16 +1429,19 @@
     ctx.restore();
   }
 
+  const perfNow = () => (window.performance && performance.now) ? performance.now() : (T || 0);
   function frame(ts) {
-    lastTs = T;
-    T = ts || 0;
-    const fdt = T - lastTs;
-    if (fdt > 0 && fdt < 400) ftAvg += (fdt - ftAvg) * 0.04;
-    if (++tierCheck >= 150) {
-      tierCheck = 0;
-      if (perfTier === 0 && ftAvg > 34) { perfTier = 1; floraEvery = 3; initParticles(); }
-      else if (perfTier === 1 && ftAvg < 22) { perfTier = 0; floraEvery = 2; initParticles(); }
-    }
+    requestAnimationFrame(frame);
+    const now = ts || 0;
+    if (document.hidden) return;                    // the browser pauses rAF when hidden; guard anyway
+    // battery: cap the frame rate. The scene is atmospheric — 40fps while she interacts, 26 while it
+    // breathes on its own, a trickle when everything is still. A capped loop draws far less than 60fps.
+    const active = dragY !== null || cam > 0.001 || camTarget > 0.001 || Math.abs(panX - panTarget) > 0.5 || pinching || zoomScale > 1.01;
+    const fps = active ? 40 : (motionOn() ? 26 : 6);
+    if (now - T < 1000 / fps - 1.5) return;
+    lastTs = T; T = now;
+    const t0 = perfNow();
+
     if (dragY === null && (cam > 0.0005 || camTarget > 0)) {
       camVel += (camTarget - cam) * 0.026;          // soft spring, settles ~600ms
       camVel *= 0.86;
@@ -1448,26 +1452,21 @@
     ctx.clearRect(0, 0, W, H);
     const oy = camOffset();
     drawZenith(oy);
+    // parallax: far layers slide less than the foreground as she pans, for real depth.
+    // the sun still travels a little (0.5), just not as far as the garden (1.0).
+    const lay = (f, fn) => { ctx.save(); ctx.translate(-panX * f, oy); fn(); ctx.restore(); };
+    lay(0, drawSky);
+    lay(0.1, drawStars);
+    lay(0.5, drawRays);
+    lay(0.6, drawClouds);
+    lay(0.5, drawCelestial);
+    lay(0.35, drawRidges);          // distant mountains drift slowly
     ctx.save();
-    ctx.translate(-panX, oy);
-    drawSky();
-    drawStars();
-    drawRays();
-    drawClouds();
-    drawCelestial();
+    ctx.translate(-panX, oy);        // foreground: the garden moves fully with her
     if (state.sail.on) {
-      drawRidges();
-      drawWater();
-      drawBanks();
-      drawTreeline(true);
-      daylightWash();
-      drawBoat();
+      drawWater(); drawBanks(); drawTreeline(true); daylightWash(); drawBoat();
     } else {
-      drawGround();
-      drawRidges();
-      drawTreeline(false);
-      daylightWash();
-      drawGardenScene();
+      drawGround(); drawTreeline(false); daylightWash(); drawGardenScene();
     }
     ctx.restore();
     drawAmbient();
@@ -1479,7 +1478,14 @@
     ctx.restore();
     drawSkyHud();
     document.body.classList.toggle("skyview", cam > 0.25);   // chrome bows out while looking up
-    requestAnimationFrame(frame);
+
+    const drawMs = perfNow() - t0;                  // tier off ACTUAL draw cost, not the capped interval
+    if (drawMs >= 0 && drawMs < 400) ftAvg += (drawMs - ftAvg) * 0.05;
+    if (++tierCheck >= 120) {
+      tierCheck = 0;
+      if (perfTier === 0 && ftAvg > 24) { perfTier = 1; floraEvery = 3; initParticles(); }
+      else if (perfTier === 1 && ftAvg < 12) { perfTier = 0; floraEvery = 2; initParticles(); }
+    }
   }
 
   function resize() {
@@ -1666,7 +1672,15 @@
       return { lat: +g.latitude.toFixed(4), lon: +g.longitude.toFixed(4), place: g.name + (g.admin1 ? ", " + g.admin1 : "") };
     } catch (e) { return null; }
   }
-  function refreshData() { fetchWeather(); fetchDaily(); fetchAqi(); fetchRadar(); }
+  function refreshData() { fetchWeather(); fetchDaily(); fetchAqi(); }   // radar loads only when she opens it
+
+  function openRadar() {
+    const v = el("map-view"); if (v) v.__centered = false;
+    renderHours();        // the cloud-cover strip in the radar sheet
+    updateSat();          // build the map and show whatever frames are cached
+    openSheet("radar");
+    fetchRadar();         // pull fresh frames from the network — tiles load only now, not in the background
+  }
 
   // radar over an OpenStreetMap 2x2 tile grid centered on her location, with a pin
   function mercXY(lat, lon, z) {
@@ -1708,6 +1722,8 @@
       rad.alt = ""; rad.loading = "lazy"; rad.decoding = "async"; rad.className = "radar-tile";
       rad.style.gridArea = (gy + 1) + " / " + (gx + 1);
       rad.__tx = US.x0 + gx; rad.__ty = US.y0 + gy;
+      // a tile that fails (rate limit, hiccup) goes transparent so she sees the map, never a broken-image box
+      rad.onerror = () => rad.removeAttribute("src");
       grid.appendChild(rad);
       radarImgs.push(rad);
     }
@@ -2816,14 +2832,19 @@
     };
     el("loc2-go").onclick = setLoc2;
     el("loc2-input").addEventListener("keydown", e => { if (e.key === "Enter") setLoc2(); });
-    el("open-radar").onclick = () => { renderHours(); const v = el("map-view"); if (v) { v.__centered = false; if (v.__resetZoom) v.__resetZoom(); } updateSat(); openSheet("radar"); };
+    el("open-radar").onclick = () => { const v = el("map-view"); if (v && v.__resetZoom) v.__resetZoom(); openRadar(); };
     document.querySelectorAll("#hours-tabs button").forEach(b => b.onclick = () => {
       document.querySelectorAll("#hours-tabs button").forEach(x => x.classList.toggle("on", x === b));
       el("hours-rain").style.display = b.dataset.t === "rain" ? "" : "none";
       el("hours-wind").style.display = b.dataset.t === "wind" ? "" : "none";
       el("hours-temp").style.display = b.dataset.t === "temp" ? "" : "none";
     });
-    el("sat-scrub").oninput = updateSat;
+    let satThrottle = 0;
+    el("sat-scrub").oninput = () => {   // throttle while dragging so we don't flood the tile server
+      const now = Date.now();
+      if (now - satThrottle >= 130) { satThrottle = now; updateSat(); }
+    };
+    el("sat-scrub").addEventListener("change", updateSat);   // and always render the frame she lands on
     el("radar-toggle").onclick = () => {
       const r = el("sat-radar");
       r.classList.toggle("on");
