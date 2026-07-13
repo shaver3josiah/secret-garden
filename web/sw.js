@@ -1,4 +1,4 @@
-const CACHE = "secret-garden-v20";
+const CACHE = "secret-garden-v21";
 const SHELL = [
   "./",
   "./index.html",
@@ -24,7 +24,9 @@ const SHELL = [
   "./fonts/playfair-600.woff2",
   "./fonts/playfair-600-italic.woff2"
 ];
-const NO_STORE = ["tilecache.rainviewer.com", "gibs.earthdata.nasa.gov"];
+// radar frame paths are immutable (timestamped ids), so caching tiles is safe and stops the
+// scrub from re-fetching every tile on every frame — the whole 2-hour history stays available
+const NO_STORE = ["gibs.earthdata.nasa.gov"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

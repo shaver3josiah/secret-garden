@@ -43,6 +43,7 @@
     rv: null,
     curVerse: null,
     versePaused: false,
+    paused: false,          // the pause button freezes the whole scene (session only, not saved)
     cycleStart: 0,
     cycleBase: 0,
     boatP: 0.18
@@ -72,7 +73,7 @@
   const DEFAULT_BINDS = { sky: "radar", cloud: "daily", pond: "hours", tree: "scenes", flower: "verses", ground: "compass" };
   state.settings.binds = Object.assign({}, DEFAULT_BINDS, state.settings.binds || {});
 
-  function motionOn() { return state.settings.motion && !prefersReduced; }
+  function motionOn() { return state.settings.motion && !prefersReduced && !state.paused; }
   function activeTheme() {
     if (state.themeId.indexOf("custom:") === 0) {
       const id = state.themeId.slice(7);
@@ -1033,6 +1034,7 @@
   function drawGardenScene() {
     if (!L) return;
     const P = gePalette(), t = motionOn() ? T * 0.001 : 0, wind = windAmp() || 0.35;
+    if (motionOn()) robinFreezeT = T * 0.001;   // hold the robin's current pose when the scene is paused
     gFrame++;
     const FDPR = Math.min(DPR, 1.5);   // flora is soft art; 1.5x is indistinguishable and 44% lighter
     const bw = Math.round(W * 1.8 * FDPR), bh = Math.round(H * FDPR);
@@ -1046,7 +1048,7 @@
       paintFlora(gctx, P, t, wind);
     }
     ctx.drawImage(gcv, -W * 0.4, 0, W * 1.8, H);
-    drawRobinVignette(P, T * 0.001);
+    drawRobinVignette(P, motionOn() ? T * 0.001 : (robinFreezeT || 0));
     drawButterflies(P, t);
   }
   function paintFlora(g2, P, t, wind) {
@@ -1207,6 +1209,27 @@
       ctx.quadraticCurveTo(W * 0.5 + off, yy + 2, W * 1.4, yy);
       ctx.stroke();
     }
+    // a finer set of ripples drifting the other way — gentle counter-motion, still cheap
+    ctx.strokeStyle = "rgba(255,255,255,0.16)";
+    for (let i = 0; i < 6; i++) {
+      const yy = horizonY + (i * 1.7 + 1.2) / 10.5 * (H - horizonY);
+      const off = motionOn() ? Math.sin(-T * 0.0016 + i * 2.3) * (4 + i * 1.5) : 0;
+      ctx.globalAlpha = 0.16 - i * 0.02;
+      ctx.beginPath();
+      ctx.moveTo(-W * 0.4, yy + 5);
+      ctx.quadraticCurveTo(W * 0.45 + off, yy + 7, W * 1.4, yy + 5);
+      ctx.stroke();
+    }
+    // a handful of slow specular glints twinkling on the surface — seven tiny dashes, no per-pixel work
+    ctx.fillStyle = "#fff";
+    for (let i = 0; i < 7; i++) {
+      const gy = horizonY + (H - horizonY) * (0.22 + (i * 0.11) % 0.72);
+      const gx = ((i * 0.17 + (motionOn() ? T * 0.00002 * (1 + i % 3) : 0)) % 1) * W * 1.3 - W * 0.15;
+      const tw = motionOn() ? Math.max(0, Math.sin(T * 0.003 + i * 1.9)) : 0.35;
+      ctx.globalAlpha = 0.42 * tw;
+      const gw = 2 + (gy - horizonY) / (H - horizonY) * 5;
+      ctx.fillRect(gx, gy, gw, 1.3);
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -1237,7 +1260,7 @@
     }
   }
 
-  let boatDir = 1, boatModel = 0, boatHit = null, nestHit = null;
+  let boatDir = 1, boatModel = 0, boatHit = null, nestHit = null, robinFreezeT = 0;
   function drawBoat() {
     if (motionOn() && !document.hidden) {
       state.boatP += boatDir * (T - lastTs) * (0.9 + windAmp() * 0.5) / 90000;
@@ -1247,11 +1270,114 @@
     const bx = W * (0.27 + 0.46 * state.boatP);
     const by = horizonY + (H - horizonY) * 0.24;
     boatHit = { x: bx, y: by };
+    const s = U * 0.3;
+    boatReflection(bx, by, s);          // mirror + wake, under the hull
     // paper-cutout sloop from the element library; each turnaround swaps hulls
     ctx.save();
     ctx.translate(bx, by);
     ctx.scale(boatDir, 1);
-    GE.drawSailboat(ctx, { x: 0, y: 0, s: U * 0.3, seed: boatModel ? 4 : 11, t: motionOn() ? T * 0.001 : 0, P: gePalette() });
+    GE.drawSailboat(ctx, { x: 0, y: 0, s: s, seed: boatModel ? 4 : 11, t: motionOn() ? T * 0.001 : 0, P: gePalette() });
+    ctx.restore();
+    boatWaterline(bx, by, s);           // water over the submerged bottom + a lapping foam line
+  }
+  function boatReflection(bx, by, s) {
+    const wl = by + s * 0.1;
+    ctx.save();
+    ctx.globalAlpha = 0.13;
+    ctx.fillStyle = "rgb(26,38,50)";
+    ctx.beginPath(); ctx.ellipse(bx, wl + s * 0.18, s * 0.42, s * 0.15, 0, 0, 6.2832); ctx.fill();
+    ctx.restore();
+  }
+  function boatWaterline(bx, by, s) {
+    const sc = skyColors(), alt = sunAltitude(), nk = clamp(1 - alt * 3, 0, 1);
+    const wc = mix(mix(sc.hor, [110, 138, 148], 0.42), [56, 74, 96], nk * 0.5);
+    const t = motionOn() ? T * 0.002 : 0;
+    const hw = s * 0.52;
+    const wl = by + s * 0.1 + (motionOn() ? Math.sin(T * 0.00085) * s * 0.015 : 0);   // waterline, gentle bob
+    ctx.save();
+    // water over the submerged hull bottom — clip to below the waterline, tint the belly
+    ctx.save();
+    ctx.beginPath(); ctx.rect(bx - hw * 1.5, wl, hw * 3, s * 0.45); ctx.clip();
+    ctx.beginPath(); ctx.ellipse(bx, by + s * 0.04, hw * 1.04, s * 0.3, 0, 0, 6.2832);
+    ctx.fillStyle = "rgba(" + wc[0] + "," + wc[1] + "," + wc[2] + ",0.74)";
+    ctx.fill();
+    ctx.restore();
+    // waterline foam — a bright line lapping the hull, curling at bow and stern
+    ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = Math.max(1, s * 0.015); ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(bx - hw * 1.15, wl + Math.sin(t + 2) * s * 0.01);
+    ctx.quadraticCurveTo(bx - hw * 0.4, wl - s * 0.012, bx, wl + s * 0.004);
+    ctx.quadraticCurveTo(bx + hw * 0.4, wl + s * 0.014, bx + hw * 1.15, wl + Math.sin(t) * s * 0.01);
+    ctx.stroke();
+    // two faint wake ripples fanning out from the hull
+    for (let i = 1; i <= 2; i++) {
+      ctx.globalAlpha = 0.2 - i * 0.055;
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = Math.max(0.8, s * 0.008);
+      const rr = hw * (1.1 + i * 0.5) + (motionOn() ? Math.sin(t * 0.7 + i) * s * 0.02 : 0);
+      ctx.beginPath(); ctx.ellipse(bx, wl + s * 0.05, rr, rr * 0.14, 0, Math.PI * 0.1, Math.PI * 0.9); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // seagulls: a small flock crosses or loops through the far sky every ~20 seconds
+  let gulls = [], gullTimer = 4000;
+  function updateGulls(dt) {
+    if (!state.sail.on) { if (gulls.length) gulls = []; return; }
+    if (!motionOn()) return;
+    gullTimer -= dt;
+    if (gullTimer <= 0) {
+      gullTimer = 18000 + Math.random() * 9000;
+      const n = 1 + Math.floor(Math.random() * 3), dir = Math.random() < 0.5 ? 1 : -1;
+      const baseY = horizonY * (0.16 + Math.random() * 0.4), loop = Math.random() < 0.35, size = U * (0.02 + Math.random() * 0.012);
+      for (let i = 0; i < n; i++) gulls.push({ x: dir > 0 ? -30 - i * 34 : W + 30 + i * 34, y: baseY + i * 13 + (Math.random() - 0.5) * 18, dir: dir, spd: 0.3 + Math.random() * 0.22, ph: Math.random() * 6.28, size: size, loop: loop });
+    }
+    for (const g of gulls) { g.x += g.dir * g.spd * dt * 0.05; if (g.loop) g.y += Math.sin(g.x * 0.012 + g.ph) * 0.28; }
+    gulls = gulls.filter(g => g.x > -50 && g.x < W + 50);
+  }
+  function drawGulls() {
+    if (!gulls.length) return;
+    ctx.save();
+    ctx.strokeStyle = isNight() ? "rgba(150,160,180,0.42)" : "rgba(46,56,68,0.5)";
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (const g of gulls) {
+      const s = g.size, flap = motionOn() ? (Math.sin(T * 0.009 + g.ph) * 0.5 + 0.5) : 0.5, up = s * (0.25 + flap * 0.55);
+      ctx.lineWidth = Math.max(1, s * 0.14);
+      ctx.beginPath();
+      ctx.moveTo(g.x - s, g.y - up * 0.28);
+      ctx.quadraticCurveTo(g.x - s * 0.4, g.y - up, g.x, g.y);
+      ctx.quadraticCurveTo(g.x + s * 0.4, g.y - up, g.x + s, g.y - up * 0.28);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // a little lighthouse further upstream, on the far bank, with a slow blinking beam
+  function drawLighthouse() {
+    const g = H - horizonY, bx = W * 0.82, base = horizonY + g * 0.12, h = g * 0.15, w = h * 0.26;
+    const night = isNight(), nf = clamp(1 - sunAltitude() * 3, 0, 1);
+    ctx.save();
+    ctx.fillStyle = "rgba(38,50,42,0.7)";                              // rocky footing
+    ctx.beginPath(); ctx.ellipse(bx, base, w * 0.95, h * 0.06, 0, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = night ? "rgb(120,128,140)" : "rgb(234,228,215)";   // tapered tower
+    ctx.beginPath();
+    ctx.moveTo(bx - w * 0.6, base); ctx.lineTo(bx - w * 0.34, base - h); ctx.lineTo(bx + w * 0.34, base - h); ctx.lineTo(bx + w * 0.6, base);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = night ? "rgb(116,70,66)" : "rgb(184,90,82)";       // red band
+    ctx.beginPath(); ctx.moveTo(bx - w * 0.47, base - h * 0.5); ctx.lineTo(bx + w * 0.47, base - h * 0.5); ctx.lineTo(bx + w * 0.42, base - h * 0.66); ctx.lineTo(bx - w * 0.42, base - h * 0.66); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = night ? "rgb(58,68,78)" : "rgb(70,84,92)";         // lantern room
+    ctx.fillRect(bx - w * 0.3, base - h - h * 0.13, w * 0.6, h * 0.13);
+    ctx.fillStyle = night ? "rgb(78,50,48)" : "rgb(120,62,56)";        // roof
+    ctx.beginPath(); ctx.moveTo(bx - w * 0.37, base - h - h * 0.13); ctx.lineTo(bx, base - h - h * 0.3); ctx.lineTo(bx + w * 0.37, base - h - h * 0.13); ctx.closePath(); ctx.fill();
+    const cy = base - h - h * 0.06;
+    const blink = motionOn() ? Math.pow(0.5 + 0.5 * Math.sin(T * 0.0021), 4) : 0.25;
+    if (blink > 0.04) {
+      const lr = h * 0.6, a = (night ? 0.95 : 0.5 + nf * 0.2) * blink;
+      const gl = ctx.createRadialGradient(bx, cy, 0, bx, cy, lr);
+      gl.addColorStop(0, "rgba(255,240,190," + a.toFixed(2) + ")"); gl.addColorStop(1, "rgba(255,240,190,0)");
+      ctx.fillStyle = gl; ctx.fillRect(bx - lr, cy - lr, lr * 2, lr * 2);
+      ctx.globalAlpha = a * 0.5; ctx.fillStyle = "rgba(255,240,190,0.5)";
+      ctx.beginPath(); ctx.moveTo(bx, cy); ctx.lineTo(bx - lr * 2.4, cy - lr * 0.45); ctx.lineTo(bx - lr * 2.4, cy + lr * 0.2); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
     ctx.restore();
   }
 
@@ -1460,11 +1586,12 @@
     lay(0.5, drawRays);
     lay(0.6, drawClouds);
     lay(0.5, drawCelestial);
+    if (state.sail.on) { updateGulls(T - lastTs); lay(0.55, drawGulls); }   // seagulls cross the far sky
     lay(0.35, drawRidges);          // distant mountains drift slowly
     ctx.save();
     ctx.translate(-panX, oy);        // foreground: the garden moves fully with her
     if (state.sail.on) {
-      drawWater(); drawBanks(); drawTreeline(true); daylightWash(); drawBoat();
+      drawWater(); drawBanks(); drawLighthouse(); drawTreeline(true); daylightWash(); drawBoat();
     } else {
       drawGround(); drawTreeline(false); daylightWash(); drawGardenScene();
     }
@@ -1722,8 +1849,13 @@
       rad.alt = ""; rad.loading = "lazy"; rad.decoding = "async"; rad.className = "radar-tile";
       rad.style.gridArea = (gy + 1) + " / " + (gx + 1);
       rad.__tx = US.x0 + gx; rad.__ty = US.y0 + gy;
-      // a tile that fails (rate limit, hiccup) goes transparent so she sees the map, never a broken-image box
-      rad.onerror = () => rad.removeAttribute("src");
+      // a failed tile (a rate-limit hiccup) retries with backoff, then goes transparent — never a broken box
+      rad.onerror = () => {
+        rad.__err = (rad.__err || 0) + 1;
+        const want = rad.__want;
+        if (rad.__err <= 3 && want) setTimeout(() => { if (rad.__want === want) { rad.removeAttribute("src"); rad.src = want; } }, 500 * rad.__err);
+        else rad.removeAttribute("src");
+      };
       grid.appendChild(rad);
       radarImgs.push(rad);
     }
@@ -1773,8 +1905,11 @@
     const idx = frames.length ? clamp(frames.length - 1 + (+el("sat-scrub").value), 0, frames.length - 1) : -1;
     const fr = idx >= 0 ? frames[idx] : null;
     for (const rad of radarImgs) {
-      if (fr) rad.src = state.rv.host + fr.path + "/256/" + US.z + "/" + rad.__tx + "/" + rad.__ty + "/2/1_1.png";
-      else rad.removeAttribute("src");
+      if (fr) {
+        const url = state.rv.host + fr.path + "/256/" + US.z + "/" + rad.__tx + "/" + rad.__ty + "/2/1_1.png";
+        rad.__want = url; rad.__err = 0;
+        if (rad.src !== url) rad.src = url;          // unchanged frames stay put (browser/SW cache, no refetch)
+      } else { rad.__want = null; rad.removeAttribute("src"); }
     }
     grid.classList.toggle("radar-off", el("radar-toggle").textContent.indexOf("off") >= 0);
     const cols = US.x1 - US.x0 + 1, rows = US.y1 - US.y0 + 1;
@@ -2750,7 +2885,13 @@
   function wire() {
     el("verse-next").onclick = () => setVerse(pickVerse());
     const pause = el("verse-pause");
-    pause.onclick = () => { state.versePaused = !state.versePaused; pause.setAttribute("aria-pressed", state.versePaused ? "true" : "false"); pause.textContent = state.versePaused ? "▶" : "❚❚"; };
+    pause.onclick = () => {
+      state.paused = !state.paused;                       // freeze the whole scene, not just the verse
+      pause.setAttribute("aria-pressed", state.paused ? "true" : "false");
+      pause.setAttribute("aria-label", state.paused ? "Resume the scene" : "Pause the scene");
+      pause.textContent = state.paused ? "▶" : "❚❚";
+      toast(state.paused ? "The garden holds still" : "The garden stirs again");
+    };
     el("open-about").onclick = openAbout;
     el("sheet-backdrop").onclick = closeSheet;
     document.querySelectorAll(".sheet-close").forEach(b => b.onclick = closeSheet);
