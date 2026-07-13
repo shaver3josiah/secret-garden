@@ -48,6 +48,30 @@
     boatP: 0.18
   };
 
+  // long-press shortcuts: press and hold a part of the scene to open a tool, remappable in settings
+  const BIND_TARGETS = [
+    { k: "sky", label: "The open sky" },
+    { k: "cloud", label: "A passing cloud" },
+    { k: "pond", label: "The pond" },
+    { k: "tree", label: "A tree" },
+    { k: "flower", label: "A flower" },
+    { k: "ground", label: "The grass" }
+  ];
+  const BIND_ACTIONS = [
+    { k: "radar", label: "Rain radar" },
+    { k: "daily", label: "10-day forecast" },
+    { k: "hours", label: "Hourly sky" },
+    { k: "scenes", label: "Gardens & scenes" },
+    { k: "compass", label: "Compass & stars" },
+    { k: "verses", label: "Her verses" },
+    { k: "sky", label: "Sun & moon" },
+    { k: "route", label: "Routes" },
+    { k: "tour", label: "The tour" },
+    { k: "none", label: "Nothing" }
+  ];
+  const DEFAULT_BINDS = { sky: "radar", cloud: "daily", pond: "hours", tree: "scenes", flower: "verses", ground: "compass" };
+  state.settings.binds = Object.assign({}, DEFAULT_BINDS, state.settings.binds || {});
+
   function motionOn() { return state.settings.motion && !prefersReduced; }
   function activeTheme() {
     if (state.themeId.indexOf("custom:") === 0) {
@@ -566,9 +590,56 @@
       return;
     }
     clearUntil = Date.now() + 90000;
-    const pool = VERSES.filter(v => v.moods.indexOf("storm") >= 0 || v.moods.indexOf("wind") >= 0);
+    let pool = VERSES.filter(v => v.moods.indexOf("power") >= 0);
+    if (!pool.length) pool = VERSES.filter(v => v.moods.indexOf("storm") >= 0 || v.moods.indexOf("wind") >= 0);
     if (pool.length) setVerse(pool[Math.floor(Math.random() * pool.length)]);
     toast("A reminder of His power over the skies");
+  }
+
+  // ---------- long-press shortcuts: what did she press, and what should it open ----------
+  function sceneTargetAt(x, y) {
+    if (cam >= 0.3) return null;                 // only from the garden view
+    const xw = x + panX;
+    if (y < horizonY) {
+      for (const c of clouds) {                  // a cloud drifting by?
+        if (Math.abs(xw - (c.x + partShift(c.x))) < 95 * c.s && Math.abs(y - (c.y + 30)) < 64 * c.s) return "cloud";
+      }
+      return "sky";
+    }
+    if (L && L.pond) {
+      const dx = (xw - L.pond.cx) / (L.pond.rx + 20), dy = (y - L.pond.cy) / (L.pond.ry + 14);
+      if (dx * dx + dy * dy < 1) return "pond";
+    }
+    if (L && L.trees) for (const t of L.trees) {
+      if (xw > t.x - t.h * 0.28 && xw < t.x + t.h * 0.28 && y > t.y - t.h && y < t.y + 6) return "tree";
+    }
+    if (L && L.flowers) for (const f of L.flowers) {
+      if (Math.abs(xw - f.x) < Math.max(22, f.h * 0.55) && y > f.y - f.h * 1.1 && y < f.y + 8) return "flower";
+    }
+    return "ground";
+  }
+  function runBind(a) {
+    switch (a) {
+      case "radar": { renderHours(); const v = el("map-view"); if (v) { v.__centered = false; if (v.__resetZoom) v.__resetZoom(); } updateSat(); openSheet("radar"); return true; }
+      case "daily": renderDaily(); if (!state.daily) fetchDaily(); openSheet("daily"); return true;
+      case "hours": renderHours(); openSheet("hours"); return true;
+      case "scenes": buildThemeChips(); document.querySelectorAll("#backdrop-seg button").forEach(b => b.classList.toggle("on", b.dataset.v === state.settings.backdrop)); openSheet("scenes"); return true;
+      case "compass": openCompass(); return true;
+      case "verses": renderCvList(); openSheet("verses"); return true;
+      case "sky": openSky(isNight() ? "moon" : "sun"); return true;
+      case "route": renderRoute(); renderTrip(); renderFavs(); openSheet("route"); return true;
+      case "tour": openTour(); return true;
+      default: return false;
+    }
+  }
+  function doLongPress(x, y) {
+    if (placing || cam >= 0.3) return;
+    const target = sceneTargetAt(x, y);
+    if (!target) return;
+    const action = (state.settings.binds || DEFAULT_BINDS)[target];
+    if (!action || action === "none") return;
+    if (navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
+    runBind(action);
   }
 
   // ---------- look-up camera: pull the sky down over the garden ----------
@@ -680,53 +751,47 @@
     ctx.drawImage(spr, cx - (wb / 2 + padX), cy - padTop, wb + padX * 2, padTop + padBot);
     ctx.globalAlpha = 1;
   }
-  // the verse rides its own cloud: an OPAQUE body sized to fully cover the text box (coverW x coverH),
-  // so the words are never spotty or half off the white. Cauliflower bumps ride the top for cloud form.
+  // the verse rides a real cumulus: a run of overlapping puffs sits tight to the text so it reads
+  // clearly, with a soft uneven top AND underside — no rectangular white slab, no wide margins.
   function paintVerseCloud(g2, cx, cy, coverW, coverH, seed, night) {
     const r = rng(seed);
-    const mx = coverH * 0.34, my = coverH * 0.16;      // solid margin around the text box
-    const bw = coverW + mx * 2, bh = coverH + my * 2;
-    const left = cx - bw / 2, top = cy - bh / 2;
-    const rad = Math.min(mx, my * 2.2, bh * 0.4);       // corner radius never bites into the text box
+    const R = coverH * 0.6;                        // body puff radius — covers the line height
+    const span = coverW + coverH * 0.56;           // rounded ends just past the last letters
+    const spacing = coverH * 0.52;
+    const nBody = Math.max(2, Math.round(span / spacing));
     g2.save();
     g2.beginPath();
-    g2.roundRect(left, top, bw, bh, rad);   // full covering body — the whole text box is opaque
-    const bumps = Math.max(3, Math.round(bw / (bh * 0.62)));
-    for (let i = 0; i <= bumps; i++) {
-      const t = i / bumps;
-      const bx = left + bw * (0.05 + t * 0.9);
-      const brad = bh * (0.3 + r() * 0.12) * (1 - Math.abs(t - 0.5) * 0.26);
-      const by = top + bh * 0.16 + (r() - 0.5) * bh * 0.06;
-      g2.moveTo(bx + brad, by); g2.arc(bx, by, brad, 0, 6.2832);
+    for (let i = 0; i <= nBody; i++) {             // body: overlapping puffs, soft top and underside
+      const t = i / nBody;
+      const rr = R * (0.92 + r() * 0.16) * (1 - Math.abs(t - 0.5) * 0.28);
+      const bx = cx - span / 2 + t * span, by = cy + (r() - 0.5) * coverH * 0.1;
+      g2.moveTo(bx + rr, by); g2.arc(bx, by, rr, 0, 6.2832);
     }
-    g2.moveTo(left + bh * 0.36, cy + bh * 0.06); g2.arc(left + bh * 0.2, cy + bh * 0.06, bh * 0.36, 0, 6.2832);
-    g2.moveTo(cx + bw / 2 - bh * 0.2 + bh * 0.36, cy + bh * 0.06); g2.arc(cx + bw / 2 - bh * 0.2, cy + bh * 0.06, bh * 0.36, 0, 6.2832);
-    // a gently uneven base — lobes hang just below the body so the bottom reads soft, not cut flat
-    const bb = Math.max(3, Math.round(bw / (bh * 0.85)));
-    for (let i = 0; i <= bb; i++) {
-      const t = i / bb;
-      const bx = left + bw * (0.08 + t * 0.84);
-      const brad = bh * (0.17 + r() * 0.11);
-      const by = top + bh - bh * (0.03 + r() * 0.05);   // centered at the base, hanging a little below it
-      g2.moveTo(bx + brad, by); g2.arc(bx, by, brad, 0, 6.2832);
+    const nTop = Math.max(2, Math.round(span / coverH));   // a few taller crowns for cumulus character
+    for (let i = 0; i < nTop; i++) {
+      const rr = R * (0.5 + r() * 0.32);
+      const bx = cx - span / 2 + (i + 0.5) / nTop * span + (r() - 0.5) * spacing * 0.4;
+      const by = cy - coverH * 0.3 - rr * 0.45;
+      g2.moveTo(bx + rr, by); g2.arc(bx, by, rr, 0, 6.2832);
     }
-    g2.fillStyle = night ? "rgba(230,235,244,0.98)" : "rgba(253,254,252,0.98)";
+    g2.fillStyle = night ? "rgba(233,238,247,0.96)" : "rgba(253,254,252,0.96)";
     g2.fill();
     g2.clip();
-    const g = g2.createLinearGradient(0, top, 0, top + bh);
-    g.addColorStop(0, "rgba(255,255,255,0.85)");
-    g.addColorStop(0.78, "rgba(255,255,255,0)");   // keep the text zone bright; shade only the very base
-    g.addColorStop(1, night ? "rgba(120,134,160,0.34)" : "rgba(196,206,214,0.38)");
-    g2.fillStyle = g; g2.fillRect(left - bh, top - bh, bw + bh * 2, bh * 3);
-    const hl = g2.createRadialGradient(cx - bw * 0.2, top + bh * 0.32, 4, cx - bw * 0.2, top + bh * 0.32, bw * 0.46);
-    hl.addColorStop(0, night ? "rgba(246,248,254,0.4)" : "rgba(255,252,240,0.55)");
+    const gTop = cy - R - coverH * 0.5, gh = (cy + R + coverH * 0.25) - gTop;
+    const g = g2.createLinearGradient(0, gTop, 0, gTop + gh);
+    g.addColorStop(0, "rgba(255,255,255,0.78)");
+    g.addColorStop(0.62, "rgba(255,255,255,0)");
+    g.addColorStop(1, night ? "rgba(120,134,160,0.28)" : "rgba(196,206,214,0.32)");
+    g2.fillStyle = g; g2.fillRect(cx - span, gTop, span * 2, gh);
+    const hl = g2.createRadialGradient(cx - span * 0.22, cy - coverH * 0.15, 3, cx - span * 0.22, cy - coverH * 0.15, span * 0.42);
+    hl.addColorStop(0, night ? "rgba(246,248,254,0.34)" : "rgba(255,252,240,0.48)");
     hl.addColorStop(1, "rgba(255,255,255,0)");
-    g2.fillStyle = hl; g2.fillRect(left - bh, top - bh, bw + bh * 2, bh * 3);
+    g2.fillStyle = hl; g2.fillRect(cx - span, gTop, span * 2, gh);
     g2.restore();
   }
   function drawVerseCloud(cx, cy, coverW, coverH, seed, alpha, night) {
     const cw = Math.round(coverW / 8) * 8, ch = Math.round(coverH / 8) * 8;
-    const padX = ch * 0.9, padY = ch * 0.85;            // sprite margin for bumps + soft edge
+    const padX = ch * 1.05, padY = ch * 0.9;            // sprite margin for the puffs + soft edge
     const spr = sprite("verse:" + seed + ":" + cw + ":" + ch + ":" + (night ? 1 : 0),
       cw + padX * 2, ch + padY * 2, (g2) => {
         paintVerseCloud(g2, cw / 2 + padX, ch / 2 + padY, cw, ch, seed, night);
@@ -1066,7 +1131,7 @@
   function initButterflies() {
     const n = perfTier ? 2 : 3, G = H - horizonY;
     bflies = [];
-    for (let i = 0; i < n; i++) bflies.push({ sd: 3 + i * 5, x: W * (0.3 + i * 0.3), y: horizonY + G * (0.45 + i * 0.1), tx: 0, ty: 0, phase: "seek", timer: 0, flit: Math.random() * 6.28, spd: 0.9 + Math.random() * 0.5 });
+    for (let i = 0; i < n; i++) bflies.push({ sd: 3 + i * 5, x: W * (0.3 + i * 0.3), y: horizonY + G * (0.45 + i * 0.1), tx: 0, ty: 0, phase: "seek", timer: 0, flit: Math.random() * 6.28, spd: 0.5 + Math.random() * 0.3 });
   }
   function butterflyTarget() {
     if (!L || !L.flowers || !L.flowers.length) return null;
@@ -1083,7 +1148,7 @@
     if (!bflies.length) initButterflies();
     const dt = clamp((T - lastTs) / 16.7, 0, 3);
     for (const b of bflies) {
-      b.flit += 0.16 * dt;
+      b.flit += 0.11 * dt;
       if (b.phase === "seek") {
         const f = butterflyTarget();
         if (f) { b.tx = f.x + (Math.random() - 0.5) * f.h * 0.22; b.ty = f.y - f.h * 0.6; }
@@ -1093,10 +1158,10 @@
       const dx = b.tx - b.x, dy = b.ty - b.y, dist = Math.hypot(dx, dy) || 1;
       let visiting = false;
       if (b.phase === "fly") {
-        const step = Math.min(dist, b.spd * 2.4 * dt);
-        b.x += dx / dist * step + Math.cos(b.flit * 2) * 0.7 * dt;   // ease in with a fluttering wobble
-        b.y += dy / dist * step + Math.sin(b.flit * 3) * 0.5 * dt;
-        if (dist < 6) { b.phase = "visit"; b.timer = 90 + Math.random() * 160; }   // rest ~1.5–4s
+        const step = Math.min(dist, b.spd * 1.7 * dt);
+        b.x += dx / dist * step + Math.cos(b.flit * 2) * 0.5 * dt;   // ease in with a fluttering wobble
+        b.y += dy / dist * step + Math.sin(b.flit * 3) * 0.36 * dt;
+        if (dist < 6) { b.phase = "visit"; b.timer = 130 + Math.random() * 200; }   // linger ~2–5.5s
       } else {
         visiting = true;                                             // hover and bob right at the bloom
         b.x += Math.sin(b.flit * 1.6) * 0.5 * dt;
@@ -1340,9 +1405,9 @@
     // the verse rides one opaque cloud, sized so every line and the reference sit on solid white.
     // font math: text runs from the first line's caps down past the gold reference line.
     const nL = sky.lines.length;
-    const boxTop = yTop - sky.fs * 0.82;
-    const boxBot = yTop + (nL - 1) * sky.lh + sky.fs * 1.55;
-    const coverW = sky.tw + sky.fs * 0.9;
+    const boxTop = yTop - sky.fs * 0.78;
+    const boxBot = yTop + (nL - 1) * sky.lh + sky.fs * 1.5;
+    const coverW = sky.tw + sky.fs * 0.4;
     const coverH = boxBot - boxTop;
     drawVerseCloud(cxp, (boxTop + boxBot) / 2, coverW, coverH, sky.cseed || 7, a, nightMode);
     ctx.save();
@@ -1433,6 +1498,7 @@
 
   function allVerses() { return VERSES.concat(state.customVerses); }
   function currentMood() {
+    if (cam > 0.5) return "power";        // looking up into the sky calls for verses of His power
     const c = state.weather.code, k = wxKind();
     if (c >= 95) return "storm";
     if (k === "rain") return "rain";
@@ -2153,7 +2219,31 @@
     el("motion-toggle").classList.toggle("on", state.settings.motion);
     el("rotate-toggle").classList.toggle("on", state.settings.autoRotate);
     document.querySelectorAll("#skymode-seg button").forEach(b => b.classList.toggle("on", b.dataset.v === state.settings.skyMode));
+    renderBinds();
     openSheet("about");
+  }
+  function renderBinds() {
+    const wrap = el("binds-list"); if (!wrap) return;
+    wrap.innerHTML = "";
+    for (const t of BIND_TARGETS) {
+      const row = document.createElement("div");
+      row.className = "bind-row";
+      const lab = document.createElement("span");
+      lab.className = "bind-target";
+      lab.textContent = t.label;
+      const sel = document.createElement("select");
+      sel.className = "bind-select";
+      sel.setAttribute("aria-label", t.label + " opens");
+      for (const a of BIND_ACTIONS) {
+        const o = document.createElement("option");
+        o.value = a.k; o.textContent = a.label;
+        if ((state.settings.binds[t.k] || "none") === a.k) o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.onchange = () => { state.settings.binds[t.k] = sel.value; persist(); };
+      row.appendChild(lab); row.appendChild(sel);
+      wrap.appendChild(row);
+    }
   }
 
   function renderCvList() {
@@ -2405,10 +2495,11 @@
       const d = document.createElement("div");
       d.className = "trip-row";
       const rainy = rw.pp != null && (rw.pp >= 40 || (rw.code >= 51 && rw.code < 80));
-      d.innerHTML = "<span class='hlab'>" + (rw.min === 0 ? "go" : fmtDur(rw.min / 60)) + "</span><b>" + rw.name + "</b><span class='hval'>" + (rw.code != null ? wxLabel(rw.code)[1] + " " : "") + (rw.pp != null ? rw.pp + "%" + (rainy ? " rain" : "") : "") + "</span>";
+      // arrival clock is straight from the real driving time the map service returned
+      d.innerHTML = "<span class='hlab'>" + (rw.min === 0 ? "leave now" : "~" + clockFromNow(rw.min / 60)) + "</span><b>" + rw.name + "</b><span class='hval'>" + (rw.code != null ? wxLabel(rw.code)[1] + " " : "") + (rw.pp != null ? rw.pp + "%" + (rainy ? " rain" : "") : "") + "</span>";
       wrap.appendChild(d);
     });
-    el("trip-total").textContent = "About " + fmtDur(plan.totalMin / 60) + " of driving. Skies shown for each town at the half-hour you pass it.";
+    el("trip-total").textContent = "About " + fmtDur(plan.totalMin / 60) + " of real road time. Each town's sky is its forecast for the hour you actually reach it.";
   }
 
   function nm(km) { return km * 0.539957; }
@@ -2762,6 +2853,7 @@
       toast(b.dataset.v === "mountains" ? "The Catskills rise beyond the garden" : "Rolling hills beyond the garden");
     });
     el("open-tour").onclick = () => { closeSheet(); openTour(); };
+    el("binds-reset").onclick = () => { state.settings.binds = Object.assign({}, DEFAULT_BINDS); persist(); renderBinds(); toast("Shortcuts reset"); };
     el("coach-next").onclick = () => tourStep(1);
     el("coach-back").onclick = () => tourStep(-1);
     el("coach-skip").onclick = closeTour;
@@ -2781,12 +2873,13 @@
     el("trip-to").addEventListener("keydown", e => { if (e.key === "Enter") planTrip(); });
     document.querySelectorAll("#speed-seg button").forEach(b => b.onclick = () => { state.sail.speed = +b.dataset.v; persist(); renderRoute(); });
     const stage = document.querySelector(".stage");
-    let tapTimer = null, lastTap = 0;
+    let tapTimer = null, lastTap = 0, longPressTimer = null, longPressed = false;
     stage.addEventListener("pointerdown", e => {
       if (e.target !== stage) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) {
         dragY = null; dragMoved = false; dragAxis = null;   // a second finger means pinch, not drag
+        clearTimeout(longPressTimer); longPressTimer = null;
         const p = [...pointers.values()];
         pinchStartDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1;
         pinchStartScale = zoomScale;
@@ -2799,6 +2892,16 @@
       dragY = e.clientY; dragX0 = e.clientX; dragMoved = false; dragAxis = null;
       camAt = cam; panAt = panX;
       stage.setPointerCapture(e.pointerId);        // keep the drag even when the finger wanders
+      longPressed = false;                          // press and hold ~0.5s to open a scene shortcut
+      clearTimeout(longPressTimer);
+      const lpx = e.clientX, lpy = e.clientY;
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        if (dragMoved || dragAxis || pinching || placing) return;
+        longPressed = true;
+        if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
+        doLongPress(lpx, lpy);
+      }, 480);
     });
     stage.addEventListener("pointermove", e => {
       if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -2813,6 +2916,7 @@
       if (!dragAxis && (Math.abs(dy) > 10 || Math.abs(dx) > 10)) {
         dragAxis = Math.abs(dy) >= Math.abs(dx) ? "v" : "h";
         dragMoved = true;
+        clearTimeout(longPressTimer); longPressTimer = null;   // moving means a drag, not a long-press
       }
       if (dragAxis === "v") cam = clamp(camAt + dy / (H * 0.55), 0, 1);
       else if (dragAxis === "h" && cam < 0.3) panX = clamp(panAt - dx, -W * 0.35, W * 0.35);
@@ -2825,6 +2929,8 @@
         dragY = null;
         return;               // don't treat the pinch as a tap
       }
+      clearTimeout(longPressTimer); longPressTimer = null;
+      if (longPressed) { longPressed = false; dragY = null; dragMoved = false; dragAxis = null; return; }   // the hold already fired
       if (dragY === null) return;
       const wasDrag = dragMoved, axis = dragAxis;
       dragY = null; dragMoved = false; dragAxis = null;
@@ -2887,6 +2993,7 @@
     stage.addEventListener("pointercancel", e => {
       pointers.delete(e.pointerId);
       if (pinching && pointers.size < 2) { pinching = false; if (zoomScale > 1.01) scheduleZoomReset(); else resetZoom(); }
+      clearTimeout(longPressTimer); longPressTimer = null;
       dragY = null; dragMoved = false; dragAxis = null;
     });
   }

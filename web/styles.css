@@ -522,6 +522,21 @@ p.about.credit a { color: var(--honey-deep); text-decoration: none; }
 #sheet-daily .dd-v { font-size: 1.34rem; }
 #sheet-daily .dd-v small { font-size: 1.1rem; }
 
+/* long-press shortcut bindings in settings */
+.binds-hint { margin: -4px 0 12px; }
+.bind-row { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+.bind-row:last-child { border-bottom: none; }
+.bind-target { flex: 1; font-weight: 600; color: var(--ink); font-size: 0.95rem; }
+.bind-select {
+  flex: 0 0 auto; max-width: 52%;
+  font: inherit; font-size: 0.9rem; font-weight: 600;
+  color: var(--honey-deep);
+  padding: 8px 12px; border-radius: 12px;
+  border: 1px solid var(--line-warm); background: rgba(216, 178, 106, 0.12);
+  cursor: pointer;
+}
+.bind-select:focus-visible { outline: 2px solid var(--honey); outline-offset: 1px; }
+
 /* sun & moon detail sheet */
 .sky-hero { font-size: 3.2rem; line-height: 1; text-align: center; margin: 2px 0 16px; }
 #sheet-sky .dd-grid { gap: 8px 20px; }
