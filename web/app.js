@@ -33,6 +33,7 @@
     settings: Object.assign({ autoRotate: true, motion: true, skyMode: "real", backdrop: "hills", tourSeen: false }, store.settings || {}),
     weather: store.weather || { code: 0, temp: null, cloud: 22, wind: 6, windDir: 240, isDay: 1, precip: 0 },
     hourly: store.hourly || null,
+    daily: store.daily || null,
     sun: store.sun || { sunrise: 390, sunset: 1200 },
     aqi: store.aqi != null ? store.aqi : null,
     trip: Object.assign({ from: "Norwich, NY", to: "Kingston, NY", plan: null }, store.trip || {}),
@@ -57,7 +58,7 @@
   }
 
   function persist() {
-    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, sun: state.sun, aqi: state.aqi, trip: state.trip, favs: state.favs, loc2: state.loc2, hourly2: state.hourly2 });
+    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, daily: state.daily, sun: state.sun, aqi: state.aqi, trip: state.trip, favs: state.favs, loc2: state.loc2, hourly2: state.hourly2 });
   }
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -113,10 +114,15 @@
   }
   function isNight() { return sunAltitude() <= 0.02; }
 
-  function moonPhase() {
+  function moonPhaseAt(ms) {
     const syn = 29.53058867, ref = Date.UTC(2000, 0, 6, 18, 14, 0) / 86400000;
-    const jd = Date.now() / 86400000;
+    const jd = ms / 86400000;
     let p = ((jd - ref) / syn) % 1; if (p < 0) p += 1; return p;
+  }
+  function moonPhase() { return moonPhaseAt(Date.now()); }
+  function moonGlyph(p) {
+    // eight-phase emoji, new -> waxing -> full -> waning
+    return ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"][Math.floor(((p % 1) + 1 / 16) % 1 * 8) % 8];
   }
   function moonName(p) {
     if (p < 0.03 || p > 0.97) return "New moon";
@@ -1396,6 +1402,32 @@
       persist(); renderHours();
     } catch (e) {}
   }
+  async function fetchDaily() {
+    try {
+      const { lat, lon } = state.loc;
+      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon +
+        "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant" +
+        "&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=10";
+      const r = await fetch(url); if (!r.ok) { dailyFail(); return; }
+      const j = await r.json(), d = j.daily;
+      if (!d || !d.time) { dailyFail(); return; }
+      state.daily = {
+        time: d.time, code: d.weather_code, tmax: d.temperature_2m_max, tmin: d.temperature_2m_min,
+        atmax: d.apparent_temperature_max, atmin: d.apparent_temperature_min, sunrise: d.sunrise, sunset: d.sunset,
+        uv: d.uv_index_max, psum: d.precipitation_sum, pop: d.precipitation_probability_max,
+        wmax: d.wind_speed_10m_max, wgust: d.wind_gusts_10m_max, wdir: d.wind_direction_10m_dominant,
+        off: j.utc_offset_seconds != null ? j.utc_offset_seconds : null
+      };
+      persist(); renderDaily();
+    } catch (e) { dailyFail(); }
+  }
+  function dailyFail() {
+    // keep any cached forecast on screen; only offer a retry when we have nothing to show
+    if (state.daily) return;
+    const w = el("daily-list"); if (!w) return;
+    w.innerHTML = "<p class='empty-note'>The ten‑day sky is out of reach just now. Tap to try again.</p>";
+    w.onclick = () => { w.innerHTML = "<p class='empty-note'>Gathering the ten‑day sky…</p>"; fetchDaily(); };
+  }
   async function fetchAqi() {
     try {
       const { lat, lon } = state.loc;
@@ -1436,7 +1468,7 @@
       return { lat: +g.latitude.toFixed(4), lon: +g.longitude.toFixed(4), place: g.name + (g.admin1 ? ", " + g.admin1 : "") };
     } catch (e) { return null; }
   }
-  function refreshData() { fetchWeather(); fetchAqi(); fetchRadar(); }
+  function refreshData() { fetchWeather(); fetchDaily(); fetchAqi(); fetchRadar(); }
 
   // radar over an OpenStreetMap 2x2 tile grid centered on her location, with a pin
   function mercXY(lat, lon, z) {
@@ -1553,6 +1585,99 @@
     if (tempEl) tempEl.innerHTML = th;
     cloudEl.innerHTML = ch;
     updateHoursBar();
+  }
+
+  function uvText(uv) {
+    if (uv == null) return "";
+    if (uv < 3) return "Low"; if (uv < 6) return "Moderate"; if (uv < 8) return "High"; if (uv < 11) return "Very high"; return "Extreme";
+  }
+  const COMPASS16 = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+  function windDirText(deg) { return COMPASS16[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16]; }
+  function fmtClock(iso) {
+    const t = (iso || "").split("T")[1]; if (!t) return "";
+    let hh = +t.slice(0, 2); const mm = t.slice(3, 5);
+    const ap = hh >= 12 ? "PM" : "AM"; hh = hh % 12 || 12;
+    return hh + ":" + mm + " " + ap;
+  }
+  const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function dayName(iso, i) {
+    if (i === 0) return "Today";
+    const d = new Date(iso + "T00:00:00Z");
+    return isNaN(d) ? iso : DOW[d.getUTCDay()];
+  }
+  function shortDate(iso) {
+    const d = new Date(iso + "T00:00:00Z");
+    return isNaN(d) ? "" : MON[d.getUTCMonth()] + " " + d.getUTCDate();
+  }
+
+  function renderDaily() {
+    const wrap = el("daily-list"); if (!wrap) return;
+    wrap.onclick = null;   // drop any retry-tap handler left by dailyFail()
+    const d = state.daily;
+    el("daily-place").textContent = state.loc.place + " · next ten days";
+    el("daily-google").href = "https://www.google.com/search?q=" + encodeURIComponent("10 day weather forecast " + state.loc.place);
+    if (!d || !d.time || !d.time.length) {
+      wrap.innerHTML = "<p class='empty-note'>Gathering the ten‑day sky…</p>";
+      return;
+    }
+    const n = Math.min(10, d.time.length);
+    let lo = 999, hi = -999;
+    for (let i = 0; i < n; i++) { if (d.tmin[i] < lo) lo = d.tmin[i]; if (d.tmax[i] > hi) hi = d.tmax[i]; }
+    const span = Math.max(1, hi - lo);
+    let html = "";
+    for (let i = 0; i < n; i++) {
+      const w = wxLabel(d.code[i]);
+      const l = clamp((d.tmin[i] - lo) / span * 100, 0, 100);
+      const rr = clamp((d.tmax[i] - lo) / span * 100, 0, 100);
+      const width = Math.max(rr - l, 6);
+      // anchor the fill's gradient to the whole track so hue tracks the week's actual min–max,
+      // not just each bar's own length — a cold day reads cool, a hot day reads warm
+      const bgSize = (10000 / width).toFixed(1);
+      const bgPos = (width < 100 ? l / (100 - width) * 100 : 0).toFixed(1);
+      const pop = d.pop && d.pop[i] != null ? d.pop[i] : 0;
+      const popCell = pop >= 5 ? "<span class='glyph'>&#128167;</span>" + pop + "%" : "";
+      const dir = d.wdir && d.wdir[i] != null ? d.wdir[i] : 0;
+      const rain = d.psum && d.psum[i] != null ? +d.psum[i] : 0;
+      const uv = d.uv && d.uv[i] != null ? Math.round(d.uv[i]) : null;
+      const flo = Math.round(d.atmin && d.atmin[i] != null ? d.atmin[i] : d.tmin[i]);
+      const fhi = Math.round(d.atmax && d.atmax[i] != null ? d.atmax[i] : d.tmax[i]);
+      const gust = Math.round(d.wgust && d.wgust[i] != null ? d.wgust[i] : d.wmax[i]);
+      const mp = moonPhaseAt(Date.parse(d.time[i] + "T12:00:00Z"));
+      html +=
+        "<div class='day'>" +
+          "<button class='day-row' aria-expanded='false' aria-controls='dd-" + i + "'>" +
+            "<span class='day-name'><b>" + dayName(d.time[i], i) + "</b><small>" + shortDate(d.time[i]) + "</small></span>" +
+            "<span class='day-glyph' title='" + w[0] + "'>" + w[1] + "</span>" +
+            "<span class='day-pop'>" + popCell + "</span>" +
+            "<span class='day-range'><i class='lo'>" + Math.round(d.tmin[i]) + "&deg;</i>" +
+              "<span class='track'><span class='fill' style='left:" + l.toFixed(1) + "%;width:" + width.toFixed(1) + "%;background-size:" + bgSize + "% 100%;background-position:" + bgPos + "% 0'></span></span>" +
+              "<i class='hi'>" + Math.round(d.tmax[i]) + "&deg;</i></span>" +
+            "<span class='day-caret' aria-hidden='true'><svg width='14' height='14' viewBox='0 0 16 16' fill='none'><path d='M4 6l4 4 4-4' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg></span>" +
+          "</button>" +
+          "<div class='day-detail' id='dd-" + i + "' hidden>" +
+            "<div class='dd-grid'>" +
+              "<div><span class='dd-k'>" + w[0] + "</span><span class='dd-v'>feels " + flo + "&deg; to " + fhi + "&deg;</span></div>" +
+              "<div><span class='dd-k'>Wind</span><span class='dd-v'><span class='harrow' style='transform:rotate(" + ((dir + 180) % 360) + "deg)'>&#8593;</span> " + Math.round(d.wmax[i]) + " <small>gust " + gust + " mph " + windDirText(dir) + "</small></span></div>" +
+              "<div><span class='dd-k'>Rain</span><span class='dd-v'>" + (pop >= 5 ? pop + "% chance" : "none likely") + (rain > 0.004 ? " <small>" + rain.toFixed(2) + " in</small>" : "") + "</span></div>" +
+              (uv != null ? "<div><span class='dd-k'>UV index</span><span class='dd-v'>" + uv + " <small>" + uvText(uv) + "</small></span></div>" : "") +
+              "<div><span class='dd-k'>Sunrise</span><span class='dd-v'>" + fmtClock(d.sunrise[i]) + "</span></div>" +
+              "<div><span class='dd-k'>Sunset</span><span class='dd-v'>" + fmtClock(d.sunset[i]) + "</span></div>" +
+              "<div><span class='dd-k'>Moon</span><span class='dd-v'>" + moonGlyph(mp) + " " + moonName(mp) + "</span></div>" +
+            "</div>" +
+          "</div>" +
+        "</div>";
+    }
+    wrap.innerHTML = html;
+    wrap.querySelectorAll(".day-row").forEach(btn => {
+      btn.onclick = () => {
+        const det = btn.nextElementSibling;
+        const open = det.hasAttribute("hidden");
+        wrap.querySelectorAll(".day-detail").forEach(x => x.setAttribute("hidden", ""));
+        wrap.querySelectorAll(".day-row").forEach(x => x.setAttribute("aria-expanded", "false"));
+        if (open) { det.removeAttribute("hidden"); btn.setAttribute("aria-expanded", "true"); }
+      };
+    });
   }
 
   let toastTimer = null;
@@ -1707,6 +1832,8 @@
     }
     const th = placingTheme();
     el("place-count").textContent = th && th.placed ? th.placed.length + " / 100" : "";
+    const pk = placing && PLACE_KINDS.find(p => p.k === placing.kind);
+    el("place-active").textContent = pk ? pk.n : "";
   }
   function startPlacing(themeId) {
     state.themeId = "custom:" + themeId;
@@ -1714,9 +1841,11 @@
     placing = { themeId: themeId, kind: "daisy" };
     buildPlaceBar();
     el("placebar").style.display = "";
+    el("placebar").classList.remove("min");
+    el("place-min").setAttribute("aria-expanded", "true");
     el("drawer").classList.add("closed");
     closeSheet();
-    toast("Tap the garden to plant. Higher up sits farther away.");
+    toast("Tap the garden to plant. Higher up sits farther away — tuck the tray to reach the front.");
   }
   function stopPlacing() {
     placing = null;
@@ -2255,6 +2384,12 @@
       previewCreator();
     });
     el("place-done").onclick = stopPlacing;
+    el("place-min").onclick = () => {
+      const min = el("placebar").classList.toggle("min");
+      el("place-min").setAttribute("aria-expanded", min ? "false" : "true");
+      el("place-min").setAttribute("aria-label", min ? "Open the planting tray" : "Minimize the planting tray");
+      if (min) toast("Tray tucked away — plant right up front");
+    };
     el("place-undo").onclick = () => {
       const th = placingTheme(); if (!th) return;
       if (th.placed && th.placed.length) th.placed.pop();
@@ -2298,6 +2433,7 @@
       persist(); initParticles();
     });
     el("open-hours").onclick = () => { renderHours(); openSheet("hours"); };
+    el("open-daily").onclick = () => { renderDaily(); openSheet("daily"); if (!state.daily) fetchDaily(); };
     document.querySelectorAll("#hours-loc button").forEach(b => b.onclick = () => {
       const v = +b.dataset.l;
       if (v === 1 && !state.loc2) { el("loc2-row").style.display = ""; el("loc2-input").focus(); return; }

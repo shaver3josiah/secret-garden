@@ -52,6 +52,7 @@
     <a class="hb-chip" id="hb-wind-link" target="_blank" rel="noopener" aria-label="Check wind forecast on Google"><span class="glyph">&#127788;&#65039;</span><b id="hb-wind">--</b></a>
     <a class="hb-chip" id="hb-cloud-link" target="_blank" rel="noopener" aria-label="Check cloud cover on Google"><span class="glyph">&#9729;&#65039;</span><b id="hb-cloud">--%</b></a>
     <button class="chip hb-open gold" id="open-hours"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="3.2" stroke="currentColor" stroke-width="1.6"/><path d="M8 1.6v1.7M8 12.7v1.7M1.6 8h1.7M12.7 8h1.7M3.5 3.5l1.2 1.2M11.3 11.3l1.2 1.2M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Hourly sky</button>
+    <button class="chip radar-open daily-open" id="open-daily"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="1.6" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.4h12M5.2 1.8v2.4M10.8 1.8v2.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>10&#8209;day</button>
     <button class="chip radar-open" id="open-radar"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 8 L13.5 3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><path d="M11.4 8a3.4 3.4 0 1 1-3.4-3.4M14.4 8A6.4 6.4 0 1 1 8 1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>Radar</button>
   </div>
 
@@ -76,8 +77,12 @@
 </div>
 
 <div class="placebar" id="placebar" style="display:none">
+  <button class="place-min" id="place-min" aria-expanded="true" aria-label="Minimize the planting tray">
+    <svg width="24" height="12" viewBox="0 0 24 12" fill="none" aria-hidden="true"><path d="M2 3l10 6 10-6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
   <div class="place-kinds" id="place-kinds"></div>
   <div class="place-actions">
+    <span class="place-active" id="place-active"></span>
     <span class="place-count" id="place-count"></span>
     <button class="chip" id="place-undo">Undo</button>
     <button class="chip" id="place-clear">Clear</button>
@@ -167,6 +172,16 @@
   <div class="hours-panel" id="hours-rain"></div>
   <div class="hours-panel" id="hours-temp" style="display:none"></div>
   <div class="hours-panel" id="hours-wind" style="display:none"></div>
+</section>
+
+<section class="sheet" id="sheet-daily" role="dialog" aria-label="Ten day forecast">
+  <div class="sheet-head">
+    <h2>Ten <span class="em">days</span></h2>
+    <button class="icon-btn sheet-close" aria-label="Close">&#10005;</button>
+  </div>
+  <p class="about daily-place" id="daily-place"></p>
+  <div class="daily-list" id="daily-list"></div>
+  <a class="daily-google" id="daily-google" target="_blank" rel="noopener">See the ten days on Google Weather &#8599;</a>
 </section>
 
 <section class="sheet" id="sheet-radar" role="dialog" aria-label="Rain radar map">
