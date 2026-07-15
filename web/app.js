@@ -1885,32 +1885,38 @@
     const y5 = clamp(Math.round(c.yf) - 1, 0, n5 - 2);
     return { x5: x5, y5: y5, x0: x5 * 4, y0: y5 * 4, span: 8 };
   }
+  let baseGen = 0;   // invalidates in-flight base tiles when the window rebuilds
   function buildRadarMap(g) {
     const grid = el("map-grid");
-    // minmax(0,1fr), not bare 1fr: bare 1fr's auto-minimum can let the imgs' intrinsic
-    // 256px blow the tracks out past the container (seen as a hugely magnified base map)
-    grid.style.gridTemplateColumns = "repeat(" + g.span + ", minmax(0, 1fr))";
-    grid.style.gridTemplateRows = "repeat(" + g.span + ", minmax(0, 1fr))";
     const wrap = grid.parentElement;
     wrap.__baseW = g.span * 100 / 3;   // same on-screen tile size as the old map
     wrap.style.width = wrap.__baseW + "%";
     wrap.style.aspectRatio = "1";
+    // NO CSS grid, NO <img> layout: both map layers are canvases positioned with inline
+    // styles, and every tile lands at pixel coordinates via drawImage. On one device the
+    // img grid's tracks still blew out (huge blurry tiles, seams everywhere) despite
+    // minmax(0,1fr) — a canvas has no tracks to blow.
     grid.innerHTML = "";
+    wrap.querySelectorAll("canvas.base-canvas, canvas.radar-canvas").forEach(old => old.remove());
+    const layer = "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;";
+    const base = document.createElement("canvas");
+    base.className = "base-canvas";
+    base.width = g.span * 256; base.height = g.span * 256;
+    base.style.cssText = layer;
+    grid.after(base);
+    const bctx = base.getContext("2d");
+    const gen = ++baseGen;
     for (let gy = 0; gy < g.span; gy++) for (let gx = 0; gx < g.span; gx++) {
-      const base = document.createElement("img");
-      base.alt = ""; base.decoding = "async";
-      base.src = "https://tile.openstreetmap.org/7/" + (g.x0 + gx) + "/" + (g.y0 + gy) + ".png";
-      base.style.gridArea = (gy + 1) + " / " + (gx + 1);
-      grid.appendChild(base);
+      const im = new Image();
+      const dx = gx * 256, dy = gy * 256;
+      im.onload = () => { if (gen === baseGen) bctx.drawImage(im, dx, dy, 256, 256); };
+      im.src = "https://tile.openstreetmap.org/7/" + (g.x0 + gx) + "/" + (g.y0 + gy) + ".png";
     }
-    // ONE canvas for the whole radar layer, positioned with INLINE styles outside the grid
-    // (a stylesheet-dependent grid child once blew the base tracks out to 1792px).
-    wrap.querySelectorAll("canvas.radar-canvas").forEach(old => old.remove());
     const cv = document.createElement("canvas");
     cv.className = "radar-canvas";
     cv.width = 2 * R_SIZE; cv.height = 2 * R_SIZE;
-    cv.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;opacity:0.78;transition:opacity 0.3s ease";
-    grid.after(cv);   // between the base grid and the .map-pin, so the pin stays visible
+    cv.style.cssText = layer + "opacity:0.78;transition:opacity 0.3s ease";
+    base.after(cv);   // radar above base, both under the .map-pin
     radarCtx = cv.getContext("2d");
     radarCtx.__frame = undefined;      // frame path currently on the canvas
     radarFrames.clear();               // old entries' tiles belong to the old window
@@ -2477,6 +2483,11 @@
   function openAbout() {
     el("about-moon").textContent = moonName(moonPhase());
     el("about-loc").textContent = state.loc.place;
+    // which build is this device actually running, and what does it think the screen is —
+    // the two questions every glitch report needs answered
+    const ab = el("about-build");
+    if (ab) ab.textContent = "Build " + (window.SG_BUILD || "dev") + " · " +
+      window.innerWidth + "×" + window.innerHeight + " @" + (window.devicePixelRatio || 1) + "x";
     el("motion-toggle").classList.toggle("on", state.settings.motion);
     el("rotate-toggle").classList.toggle("on", state.settings.autoRotate);
     document.querySelectorAll("#skymode-seg button").forEach(b => b.classList.toggle("on", b.dataset.v === state.settings.skyMode));
@@ -3279,7 +3290,15 @@
 
   function init() {
     resize();
-    window.addEventListener("resize", () => { clearTimeout(window.__rt); window.__rt = setTimeout(resize, 180); });
+    const queueResize = () => { clearTimeout(window.__rt); window.__rt = setTimeout(resize, 180); };
+    window.addEventListener("resize", queueResize);
+    // WKWebView can hand out pre-layout bounds at launch and never fire a resize after
+    // settling — the scene then renders squeezed into a corner. visualViewport catches
+    // most of it; the slow interval is the backstop that heals any missed size change.
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", queueResize);
+    setInterval(() => {
+      if (cv.width !== Math.round(window.innerWidth * Math.min(window.devicePixelRatio || 1, 2))) queueResize();
+    }, 2000);
     buildThemeChips();
     wire();
     if (state.sail.on) { el("sail-toggle").setAttribute("aria-pressed", "true"); el("open-route").style.display = ""; el("open-route").classList.add("gold"); el("open-hours").classList.remove("gold"); el("mode-boat").style.display = "none"; el("mode-garden").style.display = ""; }

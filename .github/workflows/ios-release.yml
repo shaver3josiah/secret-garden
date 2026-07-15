@@ -33,6 +33,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Stamp the web bundle with the tag + run number so the app's About sheet says
+      # exactly which build a device is running (glitch reports stop being guesswork).
+      - name: Stamp build into web bundle
+        run: printf 'window.SG_BUILD="%s (%s)";\n' "$GITHUB_REF_NAME" "${{ github.run_number }}" > web/build-stamp.js
+
       # Fail in 2 seconds with a clear message if a secret is missing, instead of
       # ~10 minutes into the archive with a cryptic Apple error. (The p8 itself is
       # PEM-checked in the Write step below.)
