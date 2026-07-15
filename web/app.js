@@ -1859,46 +1859,51 @@
     const mm = d.getUTCMinutes();
     return hh + ":" + (mm < 10 ? "0" : "") + mm + " " + ap;
   }
-  // the whole continental US at zoom 7; tiles load lazily as she scrolls
-  const US = { z: 7, x0: 18, x1: 39, y0: 43, y1: 53 };
+  // Regional radar: a 7x7 tile window at zoom 7 centered on her town (~1,600 km across).
+  // The old whole-US grid was 242 tiles; on iOS (no service worker on file://) a frame never
+  // finished loading before the next frame started, so the map showed strips of mixed frames.
+  // 49 tiles load in a couple of seconds, and updateSat()'s rule — a tile shows the CURRENT
+  // frame or nothing — makes mixed frames impossible by construction.
+  // ponytail: fixed window, no pan-to-load beyond it; add edge-loading if she ever needs to
+  // look past ~800 km out.
+  const RADAR = { z: 7, span: 7 };
+  let radarMap = null;      // { z, x0, y0, cols, rows } of the grid currently built
   let radarImgs = [];
-  // On Android/web a service worker cached radar tiles, so a frame's 242 tiles resolved instantly
-  // and in step. iOS file:// can't run the SW, so updateSat() preloads a whole frame off-DOM and
-  // commits every tile at once (below); this Map lets repeat frames in a session skip the network.
-  // It holds URL strings only (not Image objects) so memory stays tiny — decoded bitmaps are the
-  // browser's to keep or evict.
-  const radarTileCache = new Map();
+  const radarTileCache = new Map();   // url -> decoded Image, so revisited frames swap instantly
+  const RADAR_CACHE_MAX = 600;        // ~12 frames of tiles; oldest evicted first
   let satGen = 0;
-  function buildUsMap() {
+  function radarGridFor(lat, lon) {
+    const z = RADAR.z, span = RADAR.span, n = Math.pow(2, z);
+    const c = mercXY(lat, lon, z);
+    const x0 = clamp(Math.round(c.xf - span / 2), 0, n - span);
+    const y0 = clamp(Math.round(c.yf - span / 2), 0, n - span);
+    return { z: z, x0: x0, y0: y0, cols: span, rows: span };
+  }
+  function buildRadarMap(g) {
     const grid = el("map-grid");
-    const cols = US.x1 - US.x0 + 1, rows = US.y1 - US.y0 + 1;
-    grid.style.gridTemplateColumns = "repeat(" + cols + ", 1fr)";
-    grid.style.gridTemplateRows = "repeat(" + rows + ", 1fr)";
+    grid.style.gridTemplateColumns = "repeat(" + g.cols + ", 1fr)";
+    grid.style.gridTemplateRows = "repeat(" + g.rows + ", 1fr)";
     const wrap = grid.parentElement;
-    wrap.style.width = (cols * 100 / 3) + "%";
-    wrap.style.aspectRatio = cols + " / " + rows;
+    wrap.__baseW = g.cols * 100 / 3;   // same on-screen tile size as the old map
+    wrap.style.width = wrap.__baseW + "%";
+    wrap.style.aspectRatio = g.cols + " / " + g.rows;
     grid.innerHTML = ""; radarImgs = [];
-    for (let gy = 0; gy < rows; gy++) for (let gx = 0; gx < cols; gx++) {
+    for (let gy = 0; gy < g.rows; gy++) for (let gx = 0; gx < g.cols; gx++) {
       const base = document.createElement("img");
-      base.alt = ""; base.loading = "lazy"; base.decoding = "async";
-      base.src = "https://tile.openstreetmap.org/" + US.z + "/" + (US.x0 + gx) + "/" + (US.y0 + gy) + ".png";
+      base.alt = ""; base.decoding = "async";
+      base.src = "https://tile.openstreetmap.org/" + g.z + "/" + (g.x0 + gx) + "/" + (g.y0 + gy) + ".png";
       base.style.gridArea = (gy + 1) + " / " + (gx + 1);
       grid.appendChild(base);
       const rad = document.createElement("img");
-      rad.alt = ""; rad.loading = "lazy"; rad.decoding = "async"; rad.className = "radar-tile";
+      rad.alt = ""; rad.decoding = "async"; rad.className = "radar-tile";
       rad.style.gridArea = (gy + 1) + " / " + (gx + 1);
-      rad.__tx = US.x0 + gx; rad.__ty = US.y0 + gy;
-      // a failed tile (a rate-limit hiccup) retries with backoff, then goes transparent — never a broken box
-      rad.onerror = () => {
-        rad.__err = (rad.__err || 0) + 1;
-        const want = rad.__want;
-        if (rad.__err <= 3 && want) setTimeout(() => { if (rad.__want === want) { rad.removeAttribute("src"); rad.src = want; } }, 500 * rad.__err);
-        else rad.removeAttribute("src");
-      };
+      rad.__tx = g.x0 + gx; rad.__ty = g.y0 + gy;
       grid.appendChild(rad);
       radarImgs.push(rad);
     }
-    grid.dataset.built = "us";
+    radarMap = g;
+    grid.dataset.built = g.z + "/" + g.x0 + "/" + g.y0;   // rebuilt when her location moves the window
+    const view = el("map-view"); if (view) view.__centered = false;
   }
   // radar map: two fingers pinch to grow the map up to ~5x the view; one finger still pans it
   function setupRadarZoom() {
@@ -1906,9 +1911,9 @@
     const pts = new Map();
     let startDist = 0, startZoom = 1, mz = 1;
     function setZoom(z, midX, midY) {
-      z = clamp(z, 1, 3);                      // 165% base × 3 ≈ 5x the view
+      z = clamp(z, 1, 3);                      // base width × 3 ≈ a close look at her county
       const prev = mz; mz = z;
-      wrap.style.width = (165 * mz).toFixed(1) + "%";
+      wrap.style.width = ((wrap.__baseW || 165) * mz).toFixed(1) + "%";
       if (midX != null && prev > 0) {          // hold the pinched point steady while it grows
         const rect = view.getBoundingClientRect(), lx = midX - rect.left, ly = midY - rect.top;
         view.scrollLeft = (view.scrollLeft + lx) * (mz / prev) - lx;
@@ -1935,71 +1940,67 @@
     el("map-zoom-reset").onclick = () => setZoom(1);
     view.__resetZoom = () => setZoom(1);
   }
-  // Fill a radar frame progressively: her location's tiles first (nearest), then the rest of the US
-  // fanning outward, throttled. Loading all ~240 cross-origin tiles at once overwhelmed a phone and
-  // tore the frame into squares; this keeps her area instant and is gentle on the tile server.
-  // `jobs` must be pre-sorted nearest-first.
+  // Fill the missing tiles of a frame, nearest-to-her first. 49 tiles at 6 concurrent
+  // finishes in a couple of seconds; no pacing needed at this scale.
   function loadRadarFrame(jobs, gen) {
-    const CONC = 6;      // concurrent fetches — instant near her, still easy on the server
-    const BURST = 18;    // her immediate area: no pacing delay
-    const PACE = 120;    // ms between later tiles -> the whole US fills over ~25-30s
+    const CONC = 6;
     let i = 0, inflight = 0;
     (function pump() {
       if (gen !== satGen) return;                       // frame changed (scrub) -> abandon this fill
       while (inflight < CONC && i < jobs.length) {
-        const job = jobs[i], paced = i >= BURST; i++; inflight++;
-        loadRadarTile(job, gen, () => {
-          inflight--;
-          if (gen !== satGen) return;
-          if (paced) setTimeout(pump, PACE); else pump();
-        });
+        const job = jobs[i]; i++; inflight++;
+        loadRadarTile(job, gen, () => { inflight--; pump(); });
       }
     })();
   }
-  // Commit a tile's image only AFTER it has actually decoded, so the visible <img> paints from cache
-  // rather than kicking off its own late network load (that late, out-of-order load was the tearing).
-  // A straggler lets the scheduler advance but still commits itself if/when it arrives on the current frame.
+  // Fetch one tile off-DOM; commit it to the visible <img> only if its frame is still the
+  // current one. The tile was blanked by updateSat, so it goes blank -> current frame,
+  // never stale frame -> current frame. A late arrival past the 8s timeout still commits
+  // (same frame, still coherent); an error leaves the tile blank until the next render.
   function loadRadarTile(job, gen, done) {
     const rad = job.rad, url = job.url;
-    const show = () => { if (gen === satGen) { rad.__want = url; rad.__err = 0; if (rad.src !== url) rad.src = url; } };
-    if (radarTileCache.has(url)) { show(); done(); return; }   // already fetched this session -> instant
     const im = new Image(); let moved = false;
     const move = () => { if (!moved) { moved = true; done(); } };   // advance the scheduler once
-    im.onload = () => { radarTileCache.set(url, true); show(); move(); };
-    im.onerror = move;                                              // skip; the visible tile's onerror retry covers real failures
+    im.onload = () => {
+      radarTileCache.set(url, im);
+      if (radarTileCache.size > RADAR_CACHE_MAX) radarTileCache.delete(radarTileCache.keys().next().value);
+      if (gen === satGen) rad.src = url;                            // paints instantly from the decoded image
+      move();
+    };
+    im.onerror = move;
     setTimeout(move, 8000);                                         // don't let one straggler stall the fan-out
     im.src = url;
   }
   function updateSat() {
     const grid = el("map-grid"); if (!grid) return;
-    if (grid.dataset.built !== "us") buildUsMap();
-    const m = mercXY(state.loc.lat, state.loc.lon, US.z);
+    const g = radarGridFor(state.loc.lat, state.loc.lon);
+    if (grid.dataset.built !== g.z + "/" + g.x0 + "/" + g.y0) buildRadarMap(g);
+    const m = mercXY(state.loc.lat, state.loc.lon, radarMap.z);
     const frames = state.rv && state.rv.frames || [];
     el("sat-scrub").min = -(Math.max(1, frames.length) - 1);
     const idx = frames.length ? clamp(frames.length - 1 + (+el("sat-scrub").value), 0, frames.length - 1) : -1;
     const fr = idx >= 0 ? frames[idx] : null;
-    const gen = ++satGen;                            // a newer scrub abandons this frame's fill
-    if (!fr) {
-      for (const rad of radarImgs) { rad.__want = null; rad.removeAttribute("src"); }
-    } else {
-      // Order tiles by distance from her location, then fill outward (see loadRadarFrame): her area
-      // is instant and coherent, the rest of the US trickles in over ~30s without a request storm.
-      const jobs = radarImgs.map(rad => {
+    const gen = ++satGen;                            // a newer render abandons any in-flight fill
+    // The coherence rule: every tile shows the CURRENT frame (from cache, instantly) or is
+    // blanked on the spot. A stale frame is never left showing, so tiles can't mix frames \u2014
+    // the failure mode that tore the old map into strips.
+    const missing = [];
+    for (const rad of radarImgs) {
+      if (!fr) { rad.removeAttribute("src"); continue; }
+      const url = state.rv.host + fr.path + "/256/" + radarMap.z + "/" + rad.__tx + "/" + rad.__ty + "/2/1_1.png";
+      if (radarTileCache.has(url)) { if (rad.src !== url) rad.src = url; }
+      else {
+        rad.removeAttribute("src");
         const dx = rad.__tx + 0.5 - m.xf, dy = rad.__ty + 0.5 - m.yf;
-        return {
-          rad,
-          url: state.rv.host + fr.path + "/256/" + US.z + "/" + rad.__tx + "/" + rad.__ty + "/2/1_1.png",
-          d: dx * dx + dy * dy,
-        };
-      }).sort((a, b) => a.d - b.d);
-      loadRadarFrame(jobs, gen);
+        missing.push({ rad: rad, url: url, d: dx * dx + dy * dy });
+      }
     }
+    if (missing.length) loadRadarFrame(missing.sort((a, b) => a.d - b.d), gen);
     grid.classList.toggle("radar-off", el("radar-toggle").textContent.indexOf("off") >= 0);
-    const cols = US.x1 - US.x0 + 1, rows = US.y1 - US.y0 + 1;
     const pin = document.querySelector(".map-pin");
     if (pin) {
-      pin.style.left = ((m.xf - US.x0) / cols * 100) + "%";
-      pin.style.top = ((m.yf - US.y0) / rows * 100) + "%";
+      pin.style.left = ((m.xf - radarMap.x0) / radarMap.cols * 100) + "%";
+      pin.style.top = ((m.yf - radarMap.y0) / radarMap.rows * 100) + "%";
     }
     el("sat-time").textContent = fr
       ? fmtLocalTime(fr.time) + " \u00b7 " + Math.max(0, Math.round((Date.now() / 1000 - fr.time) / 60)) + " min ago"
@@ -2008,8 +2009,8 @@
     if (view && !view.__centered) {
       view.__centered = true;
       requestAnimationFrame(() => {
-        view.scrollLeft = view.scrollWidth * ((m.xf - US.x0) / cols) - view.clientWidth / 2;
-        view.scrollTop = view.scrollHeight * ((m.yf - US.y0) / rows) - view.clientHeight / 2;
+        view.scrollLeft = view.scrollWidth * ((m.xf - radarMap.x0) / radarMap.cols) - view.clientWidth / 2;
+        view.scrollTop = view.scrollHeight * ((m.yf - radarMap.y0) / radarMap.rows) - view.clientHeight / 2;
       });
     }
   }
