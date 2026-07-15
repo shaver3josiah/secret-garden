@@ -24,7 +24,7 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.jobdash.secretgarden
+        PRODUCT_BUNDLE_IDENTIFIER: com.shaver.secretgarden
         MARKETING_VERSION: "1.0.0"
         # CI overrides with CURRENT_PROJECT_VERSION=<github run number> at archive time.
         CURRENT_PROJECT_VERSION: "1"

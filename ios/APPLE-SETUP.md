@@ -10,7 +10,7 @@ If a step here is skipped or done with the wrong role, the failure shows up minu
 
 Sign in at https://appstoreconnect.apple.com as an **Account Holder or Admin** on the JobDash team — lesser roles cannot register App IDs or create app records.
 
-1. First register the bundle id: https://developer.apple.com → Certificates, Identifiers & Profiles → Identifiers → **+** → App ID → `com.jobdash.secretgarden`.
+1. First register the bundle id: https://developer.apple.com → Certificates, Identifiers & Profiles → Identifiers → **+** → App ID → `com.shaver.secretgarden`.
 2. Then App Store Connect → Apps → **+** → New App: name **Secret Garden**, that bundle id, platform iOS.
 
 ## 2. Create the App Store Connect API key
