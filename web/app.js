@@ -1935,19 +1935,40 @@
     el("map-zoom-reset").onclick = () => setZoom(1);
     view.__resetZoom = () => setZoom(1);
   }
-  // Load one tile off-DOM; resolves (never rejects) on decode, error, or a 4s timeout so one slow
-  // straggler can't stall the frame swap. ponytail: relies on the browser HTTP cache keeping the PNG
-  // after the throwaway Image is GC'd — evictable, but fine for a short radar session.
-  function preloadRadarTile(url) {
-    if (radarTileCache.has(url)) return Promise.resolve();
-    return new Promise(resolve => {
-      const im = new Image(); let done = false;
-      const fin = () => { if (!done) { done = true; resolve(); } };
-      im.onload = () => { radarTileCache.set(url, true); fin(); };
-      im.onerror = fin;
-      setTimeout(fin, 4000);
-      im.src = url;
-    });
+  // Fill a radar frame progressively: her location's tiles first (nearest), then the rest of the US
+  // fanning outward, throttled. Loading all ~240 cross-origin tiles at once overwhelmed a phone and
+  // tore the frame into squares; this keeps her area instant and is gentle on the tile server.
+  // `jobs` must be pre-sorted nearest-first.
+  function loadRadarFrame(jobs, gen) {
+    const CONC = 6;      // concurrent fetches — instant near her, still easy on the server
+    const BURST = 18;    // her immediate area: no pacing delay
+    const PACE = 120;    // ms between later tiles -> the whole US fills over ~25-30s
+    let i = 0, inflight = 0;
+    (function pump() {
+      if (gen !== satGen) return;                       // frame changed (scrub) -> abandon this fill
+      while (inflight < CONC && i < jobs.length) {
+        const job = jobs[i], paced = i >= BURST; i++; inflight++;
+        loadRadarTile(job, gen, () => {
+          inflight--;
+          if (gen !== satGen) return;
+          if (paced) setTimeout(pump, PACE); else pump();
+        });
+      }
+    })();
+  }
+  // Commit a tile's image only AFTER it has actually decoded, so the visible <img> paints from cache
+  // rather than kicking off its own late network load (that late, out-of-order load was the tearing).
+  // A straggler lets the scheduler advance but still commits itself if/when it arrives on the current frame.
+  function loadRadarTile(job, gen, done) {
+    const rad = job.rad, url = job.url;
+    const show = () => { if (gen === satGen) { rad.__want = url; rad.__err = 0; if (rad.src !== url) rad.src = url; } };
+    if (radarTileCache.has(url)) { show(); done(); return; }   // already fetched this session -> instant
+    const im = new Image(); let moved = false;
+    const move = () => { if (!moved) { moved = true; done(); } };   // advance the scheduler once
+    im.onload = () => { radarTileCache.set(url, true); show(); move(); };
+    im.onerror = move;                                              // skip; the visible tile's onerror retry covers real failures
+    setTimeout(move, 8000);                                         // don't let one straggler stall the fan-out
+    im.src = url;
   }
   function updateSat() {
     const grid = el("map-grid"); if (!grid) return;
@@ -1957,24 +1978,21 @@
     el("sat-scrub").min = -(Math.max(1, frames.length) - 1);
     const idx = frames.length ? clamp(frames.length - 1 + (+el("sat-scrub").value), 0, frames.length - 1) : -1;
     const fr = idx >= 0 ? frames[idx] : null;
-    const gen = ++satGen;                            // a newer scrub cancels this frame's pending commit
+    const gen = ++satGen;                            // a newer scrub abandons this frame's fill
     if (!fr) {
       for (const rad of radarImgs) { rad.__want = null; rad.removeAttribute("src"); }
     } else {
-      // Preload the WHOLE frame, THEN swap every tile at once — never a half-old/half-new mosaic.
-      // (The old code set each .src independently, so on uncached iOS fetches the 242 tiles landed at
-      // random times -> "strips of random tiles". Android's SW cache hid it by loading them instantly.)
-      const jobs = radarImgs.map(rad => ({
-        rad,
-        url: state.rv.host + fr.path + "/256/" + US.z + "/" + rad.__tx + "/" + rad.__ty + "/2/1_1.png",
-      }));
-      Promise.all(jobs.map(j => preloadRadarTile(j.url))).then(() => {
-        if (gen !== satGen) return;                  // a newer frame was requested meanwhile
-        for (const { rad, url } of jobs) {
-          rad.__want = url; rad.__err = 0;
-          if (rad.src !== url) rad.src = url;         // from cache now -> all tiles swap together
-        }
-      });
+      // Order tiles by distance from her location, then fill outward (see loadRadarFrame): her area
+      // is instant and coherent, the rest of the US trickles in over ~30s without a request storm.
+      const jobs = radarImgs.map(rad => {
+        const dx = rad.__tx + 0.5 - m.xf, dy = rad.__ty + 0.5 - m.yf;
+        return {
+          rad,
+          url: state.rv.host + fr.path + "/256/" + US.z + "/" + rad.__tx + "/" + rad.__ty + "/2/1_1.png",
+          d: dx * dx + dy * dy,
+        };
+      }).sort((a, b) => a.d - b.d);
+      loadRadarFrame(jobs, gen);
     }
     grid.classList.toggle("radar-off", el("radar-toggle").textContent.indexOf("off") >= 0);
     const cols = US.x1 - US.x0 + 1, rows = US.y1 - US.y0 + 1;
