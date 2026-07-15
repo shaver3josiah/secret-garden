@@ -1883,8 +1883,10 @@
   }
   function buildRadarMap(g) {
     const grid = el("map-grid");
-    grid.style.gridTemplateColumns = "repeat(" + g.cols + ", 1fr)";
-    grid.style.gridTemplateRows = "repeat(" + g.rows + ", 1fr)";
+    // minmax(0,1fr), not bare 1fr: bare 1fr's auto-minimum can let the imgs' intrinsic
+    // 256px blow the tracks out past the container (seen as a hugely magnified base map)
+    grid.style.gridTemplateColumns = "repeat(" + g.cols + ", minmax(0, 1fr))";
+    grid.style.gridTemplateRows = "repeat(" + g.rows + ", minmax(0, 1fr))";
     const wrap = grid.parentElement;
     wrap.__baseW = g.cols * 100 / 3;   // same on-screen tile size as the old map
     wrap.style.width = wrap.__baseW + "%";
@@ -1902,10 +1904,15 @@
     // new src finishes downloading, so 49 separate imgs can never swap frames in step (that lag
     // is invisible behind Android's SW tile cache, glaring on iOS's cold network) — a canvas
     // paints a frame in one synchronous pass from already-decoded images.
+    // Positioned with INLINE styles and appended to the wrap (not the grid): as a grid child
+    // relying on a stylesheet rule, a missing/stale rule made it a 1792px grid item that blew
+    // the base tracks out — the "hugely zoomed base map with crisp radar on top" bug.
+    wrap.querySelectorAll("canvas.radar-canvas").forEach(old => old.remove());
     const cv = document.createElement("canvas");
     cv.className = "radar-canvas";
     cv.width = g.cols * TILE; cv.height = g.rows * TILE;
-    grid.appendChild(cv);
+    cv.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;opacity:0.78;transition:opacity 0.3s ease";
+    grid.after(cv);   // between the base grid and the .map-pin, so the pin stays visible
     radarCtx = cv.getContext("2d");
     radarCtx.__frame = undefined;   // frame path currently on the canvas
     radarMap = g;
@@ -2012,7 +2019,8 @@
       }
     }
     if (missing.length) loadRadarFrame(missing.sort((a, b) => a.d - b.d), gen);
-    grid.classList.toggle("radar-off", el("radar-toggle").textContent.indexOf("off") >= 0);
+    // inline, not via a stylesheet selector — the canvas no longer lives inside the grid
+    if (radarCtx) radarCtx.canvas.style.opacity = el("radar-toggle").textContent.indexOf("off") >= 0 ? "0" : "0.78";
     const pin = document.querySelector(".map-pin");
     if (pin) {
       pin.style.left = ((m.xf - radarMap.x0) / radarMap.cols * 100) + "%";
@@ -3087,9 +3095,10 @@
     };
     el("sat-scrub").addEventListener("change", updateSat);   // and always render the frame she lands on
     el("radar-toggle").onclick = () => {
-      const r = el("sat-radar");
-      r.classList.toggle("on");
-      el("radar-toggle").textContent = r.classList.contains("on") ? "Rain radar on" : "Rain radar off";
+      // (was toggling #sat-radar, an element that no longer exists — it threw on every tap)
+      const btn = el("radar-toggle");
+      btn.textContent = btn.textContent.indexOf("off") >= 0 ? "Rain radar on" : "Rain radar off";
+      updateSat();   // applies the new state to the radar canvas's opacity
     };
     setupRadarZoom();
     el("open-verses").onclick = () => { renderCvList(); openSheet("verses"); };
