@@ -80,6 +80,37 @@ jobs:
           grep -q -- '-----BEGIN PRIVATE KEY-----' "$RUNNER_TEMP/asc.p8" || {
             echo "::error::APP_STORE_CONNECT_API_KEY is not raw PEM (base64-pasted?) — paste the raw .p8, see ios/APPLE-SETUP.md"; exit 1; }
 
+      # Every cloud-signed archive on an ephemeral runner mints a throwaway
+      # "Created via API" Development cert whose private key dies with the runner.
+      # The account cap fills at ~1 per release, then archiving dies with
+      # "maximum number of certificates". Revoke the dead throwaways first —
+      # strictly filtered: human-created certs (a person in Created By) and both
+      # distribution certs are never touched. Non-fatal: if the prune can't run
+      # and slots remain, the archive still succeeds; if the cap is the blocker,
+      # the archive fails with the same quota error and the manual fix is a
+      # 2-minute portal revoke (developer.apple.com -> Certificates).
+      - name: Prune Created-via-API dev certs
+        env:
+          ASC_KEY_PATH: ${{ runner.temp }}/asc.p8
+        run: |
+          command -v fastlane >/dev/null 2>&1 || gem install fastlane --no-document
+          ruby -e '
+            require "spaceship"
+            Spaceship::ConnectAPI.auth(
+              key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
+              issuer_id: ENV.fetch("APP_STORE_CONNECT_ISSUER_ID"),
+              key_filepath: ENV.fetch("ASC_KEY_PATH")
+            )
+            doomed = Spaceship::ConnectAPI::Certificate.all.select do |c|
+              c.certificate_type == "DEVELOPMENT" && c.display_name == "Created via API"
+            end
+            puts "Revoking #{doomed.length} Created-via-API development cert(s)"
+            doomed.each do |c|
+              Spaceship::ConnectAPI.delete_certificate(certificate_id: c.id)
+              puts "  revoked #{c.id}"
+            end
+          ' || echo "::warning::cert prune failed — if the archive hits the certificate cap, revoke the Created-via-API Development certs by hand at developer.apple.com -> Certificates"
+
       # CURRENT_PROJECT_VERSION = run number: unique, monotonic build numbers,
       # which TestFlight requires. Marketing version stays 1.0.0 in project.yml.
       - name: Archive
