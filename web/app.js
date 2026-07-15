@@ -1868,9 +1868,11 @@
   // look past ~800 km out.
   const RADAR = { z: 7, span: 7 };
   let radarMap = null;      // { z, x0, y0, cols, rows } of the grid currently built
-  let radarImgs = [];
+  let radarCells = [];      // { tx, ty, gx, gy } per grid cell
+  let radarCtx = null;      // the single radar canvas's 2d context
   const radarTileCache = new Map();   // url -> decoded Image, so revisited frames swap instantly
   const RADAR_CACHE_MAX = 600;        // ~12 frames of tiles; oldest evicted first
+  const TILE = 256;                   // RainViewer tile size = canvas backing-store cell
   let satGen = 0;
   function radarGridFor(lat, lon) {
     const z = RADAR.z, span = RADAR.span, n = Math.pow(2, z);
@@ -1887,20 +1889,25 @@
     wrap.__baseW = g.cols * 100 / 3;   // same on-screen tile size as the old map
     wrap.style.width = wrap.__baseW + "%";
     wrap.style.aspectRatio = g.cols + " / " + g.rows;
-    grid.innerHTML = ""; radarImgs = [];
+    grid.innerHTML = ""; radarCells = [];
     for (let gy = 0; gy < g.rows; gy++) for (let gx = 0; gx < g.cols; gx++) {
       const base = document.createElement("img");
       base.alt = ""; base.decoding = "async";
       base.src = "https://tile.openstreetmap.org/" + g.z + "/" + (g.x0 + gx) + "/" + (g.y0 + gy) + ".png";
       base.style.gridArea = (gy + 1) + " / " + (gx + 1);
       grid.appendChild(base);
-      const rad = document.createElement("img");
-      rad.alt = ""; rad.decoding = "async"; rad.className = "radar-tile";
-      rad.style.gridArea = (gy + 1) + " / " + (gx + 1);
-      rad.__tx = g.x0 + gx; rad.__ty = g.y0 + gy;
-      grid.appendChild(rad);
-      radarImgs.push(rad);
+      radarCells.push({ tx: g.x0 + gx, ty: g.y0 + gy, gx: gx, gy: gy });
     }
+    // ONE canvas for the whole radar layer. An <img> keeps painting its old picture until its
+    // new src finishes downloading, so 49 separate imgs can never swap frames in step (that lag
+    // is invisible behind Android's SW tile cache, glaring on iOS's cold network) — a canvas
+    // paints a frame in one synchronous pass from already-decoded images.
+    const cv = document.createElement("canvas");
+    cv.className = "radar-canvas";
+    cv.width = g.cols * TILE; cv.height = g.rows * TILE;
+    grid.appendChild(cv);
+    radarCtx = cv.getContext("2d");
+    radarCtx.__frame = undefined;   // frame path currently on the canvas
     radarMap = g;
     grid.dataset.built = g.z + "/" + g.x0 + "/" + g.y0;   // rebuilt when her location moves the window
     const view = el("map-view"); if (view) view.__centered = false;
@@ -1953,23 +1960,23 @@
       }
     })();
   }
-  // Fetch one tile off-DOM; commit it to the visible <img> only if its frame is still the
-  // current one. The tile was blanked by updateSat, so it goes blank -> current frame,
-  // never stale frame -> current frame. A late arrival past the 8s timeout still commits
-  // (same frame, still coherent); an error leaves the tile blank until the next render.
+  // Fetch one tile off-DOM; when it decodes, paint it straight onto the radar canvas —
+  // but only if the frame it belongs to is still the one on the canvas (gen guard), so a
+  // late arrival can never stamp an old frame's tile onto a newer frame. A straggler past
+  // the 8s timeout still paints if its frame is still current; an error leaves the cell
+  // clear until the next render.
   function loadRadarTile(job, gen, done) {
-    const rad = job.rad, url = job.url;
     const im = new Image(); let moved = false;
     const move = () => { if (!moved) { moved = true; done(); } };   // advance the scheduler once
     im.onload = () => {
-      radarTileCache.set(url, im);
+      radarTileCache.set(job.url, im);
       if (radarTileCache.size > RADAR_CACHE_MAX) radarTileCache.delete(radarTileCache.keys().next().value);
-      if (gen === satGen) rad.src = url;                            // paints instantly from the decoded image
+      if (gen === satGen && radarCtx) radarCtx.drawImage(im, job.gx * TILE, job.gy * TILE, TILE, TILE);
       move();
     };
     im.onerror = move;
     setTimeout(move, 8000);                                         // don't let one straggler stall the fan-out
-    im.src = url;
+    im.src = job.url;
   }
   function updateSat() {
     const grid = el("map-grid"); if (!grid) return;
@@ -1981,18 +1988,27 @@
     const idx = frames.length ? clamp(frames.length - 1 + (+el("sat-scrub").value), 0, frames.length - 1) : -1;
     const fr = idx >= 0 ? frames[idx] : null;
     const gen = ++satGen;                            // a newer render abandons any in-flight fill
-    // The coherence rule: every tile shows the CURRENT frame (from cache, instantly) or is
-    // blanked on the spot. A stale frame is never left showing, so tiles can't mix frames \u2014
-    // the failure mode that tore the old map into strips.
+    // Coherence by construction: the canvas is cleared and repainted from already-decoded
+    // images in ONE synchronous pass, so the visible pixels are only ever one frame (plus
+    // transparent cells still loading). Per-tile <img> swaps could never guarantee that \u2014
+    // an img keeps showing its old picture until its new download decodes.
+    const frameKey = fr ? fr.path : null;
     const missing = [];
-    for (const rad of radarImgs) {
-      if (!fr) { rad.removeAttribute("src"); continue; }
-      const url = state.rv.host + fr.path + "/256/" + radarMap.z + "/" + rad.__tx + "/" + rad.__ty + "/2/1_1.png";
-      if (radarTileCache.has(url)) { if (rad.src !== url) rad.src = url; }
-      else {
-        rad.removeAttribute("src");
-        const dx = rad.__tx + 0.5 - m.xf, dy = rad.__ty + 0.5 - m.yf;
-        missing.push({ rad: rad, url: url, d: dx * dx + dy * dy });
+    if (radarCtx) {
+      if (radarCtx.__frame !== frameKey) {
+        radarCtx.clearRect(0, 0, radarCtx.canvas.width, radarCtx.canvas.height);
+        radarCtx.__frame = frameKey;
+      }
+      if (fr) {
+        for (const c of radarCells) {
+          const url = state.rv.host + fr.path + "/256/" + radarMap.z + "/" + c.tx + "/" + c.ty + "/2/1_1.png";
+          const im = radarTileCache.get(url);
+          if (im) radarCtx.drawImage(im, c.gx * TILE, c.gy * TILE, TILE, TILE);
+          else {
+            const dx = c.tx + 0.5 - m.xf, dy = c.ty + 0.5 - m.yf;
+            missing.push({ url: url, gx: c.gx, gy: c.gy, d: dx * dx + dy * dy });
+          }
+        }
       }
     }
     if (missing.length) loadRadarFrame(missing.sort((a, b) => a.d - b.d), gen);
