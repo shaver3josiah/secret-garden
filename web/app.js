@@ -1808,6 +1808,7 @@
       if (j.radar && j.radar.past && j.radar.past.length) {
         state.rv = { host: j.host, frames: j.radar.past.slice(-19) };   // up to ~3 hours of frames
         updateSat();
+        prefetchRadarFrames();   // warm the whole scrub history: 4 small tiles per frame
       }
     } catch (e) {}
   }
@@ -1834,11 +1835,11 @@
   function refreshData() { fetchWeather(); fetchDaily(); fetchAqi(); }   // radar loads only when she opens it
 
   function openRadar() {
-    const v = el("map-view"); if (v) v.__centered = false;
+    openSheet("radar");
     renderHours();        // the cloud-cover strip in the radar sheet
     updateSat();          // build the map and show whatever frames are cached
-    openSheet("radar");
     fetchRadar();         // pull fresh frames from the network — tiles load only now, not in the background
+    centerRadar();        // holds her pin mid-view through WebKit's post-open scroll wipes
   }
 
   // radar over an OpenStreetMap 2x2 tile grid centered on her location, with a pin
@@ -1866,58 +1867,55 @@
   // frame or nothing — makes mixed frames impossible by construction.
   // ponytail: fixed window, no pan-to-load beyond it; add edge-loading if she ever needs to
   // look past ~800 km out.
-  const RADAR = { z: 7, span: 7 };
-  let radarMap = null;      // { z, x0, y0, cols, rows } of the grid currently built
-  let radarCells = [];      // { tx, ty, gx, gy } per grid cell
-  let radarCtx = null;      // the single radar canvas's 2d context
-  const radarTileCache = new Map();   // url -> decoded Image, so revisited frames swap instantly
-  const RADAR_CACHE_MAX = 600;        // ~12 frames of tiles; oldest evicted first
-  const TILE = 256;                   // RainViewer tile size = canvas backing-store cell
-  let satGen = 0;
+  // First-principles radar: one frame = FOUR zoom-5 RainViewer tiles (512px each), not 49
+  // zoom-7 ones. 4 requests can't trip rate limits (49-per-frame did — random cells came
+  // back empty and read as "torn"), the whole 19-frame history preloads in ~76 requests,
+  // and a frame paints onto the single canvas only when ALL its pieces are ready — the map
+  // is always one complete moment in time or blank, never a patchwork.
+  // The window is the 2x2 z5 block nearest her (~1,900 km); base map = the same area as
+  // 8x8 z7 OSM tiles, so radar and base align exactly by construction.
+  const R_SIZE = 512;                  // RainViewer render size per z5 tile
+  const R_OFF = [[0, 0], [1, 0], [0, 1], [1, 1]];   // the 2x2 block, (dx, dy)
+  let radarMap = null;                 // { x5, y5, x0, y0, span } — z5 block + z7 base range
+  let radarCtx = null;                 // the single radar canvas's 2d context
+  const radarFrames = new Map();       // frame path -> { imgs, left, ready, failed, map }
   function radarGridFor(lat, lon) {
-    const z = RADAR.z, span = RADAR.span, n = Math.pow(2, z);
-    const c = mercXY(lat, lon, z);
-    const x0 = clamp(Math.round(c.xf - span / 2), 0, n - span);
-    const y0 = clamp(Math.round(c.yf - span / 2), 0, n - span);
-    return { z: z, x0: x0, y0: y0, cols: span, rows: span };
+    const c = mercXY(lat, lon, 5), n5 = 32;
+    const x5 = clamp(Math.round(c.xf) - 1, 0, n5 - 2);   // 2x2 block whose center is nearest her
+    const y5 = clamp(Math.round(c.yf) - 1, 0, n5 - 2);
+    return { x5: x5, y5: y5, x0: x5 * 4, y0: y5 * 4, span: 8 };
   }
   function buildRadarMap(g) {
     const grid = el("map-grid");
     // minmax(0,1fr), not bare 1fr: bare 1fr's auto-minimum can let the imgs' intrinsic
     // 256px blow the tracks out past the container (seen as a hugely magnified base map)
-    grid.style.gridTemplateColumns = "repeat(" + g.cols + ", minmax(0, 1fr))";
-    grid.style.gridTemplateRows = "repeat(" + g.rows + ", minmax(0, 1fr))";
+    grid.style.gridTemplateColumns = "repeat(" + g.span + ", minmax(0, 1fr))";
+    grid.style.gridTemplateRows = "repeat(" + g.span + ", minmax(0, 1fr))";
     const wrap = grid.parentElement;
-    wrap.__baseW = g.cols * 100 / 3;   // same on-screen tile size as the old map
+    wrap.__baseW = g.span * 100 / 3;   // same on-screen tile size as the old map
     wrap.style.width = wrap.__baseW + "%";
-    wrap.style.aspectRatio = g.cols + " / " + g.rows;
-    grid.innerHTML = ""; radarCells = [];
-    for (let gy = 0; gy < g.rows; gy++) for (let gx = 0; gx < g.cols; gx++) {
+    wrap.style.aspectRatio = "1";
+    grid.innerHTML = "";
+    for (let gy = 0; gy < g.span; gy++) for (let gx = 0; gx < g.span; gx++) {
       const base = document.createElement("img");
       base.alt = ""; base.decoding = "async";
-      base.src = "https://tile.openstreetmap.org/" + g.z + "/" + (g.x0 + gx) + "/" + (g.y0 + gy) + ".png";
+      base.src = "https://tile.openstreetmap.org/7/" + (g.x0 + gx) + "/" + (g.y0 + gy) + ".png";
       base.style.gridArea = (gy + 1) + " / " + (gx + 1);
       grid.appendChild(base);
-      radarCells.push({ tx: g.x0 + gx, ty: g.y0 + gy, gx: gx, gy: gy });
     }
-    // ONE canvas for the whole radar layer. An <img> keeps painting its old picture until its
-    // new src finishes downloading, so 49 separate imgs can never swap frames in step (that lag
-    // is invisible behind Android's SW tile cache, glaring on iOS's cold network) — a canvas
-    // paints a frame in one synchronous pass from already-decoded images.
-    // Positioned with INLINE styles and appended to the wrap (not the grid): as a grid child
-    // relying on a stylesheet rule, a missing/stale rule made it a 1792px grid item that blew
-    // the base tracks out — the "hugely zoomed base map with crisp radar on top" bug.
+    // ONE canvas for the whole radar layer, positioned with INLINE styles outside the grid
+    // (a stylesheet-dependent grid child once blew the base tracks out to 1792px).
     wrap.querySelectorAll("canvas.radar-canvas").forEach(old => old.remove());
     const cv = document.createElement("canvas");
     cv.className = "radar-canvas";
-    cv.width = g.cols * TILE; cv.height = g.rows * TILE;
+    cv.width = 2 * R_SIZE; cv.height = 2 * R_SIZE;
     cv.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;opacity:0.78;transition:opacity 0.3s ease";
     grid.after(cv);   // between the base grid and the .map-pin, so the pin stays visible
     radarCtx = cv.getContext("2d");
-    radarCtx.__frame = undefined;   // frame path currently on the canvas
+    radarCtx.__frame = undefined;      // frame path currently on the canvas
+    radarFrames.clear();               // old entries' tiles belong to the old window
     radarMap = g;
-    grid.dataset.built = g.z + "/" + g.x0 + "/" + g.y0;   // rebuilt when her location moves the window
-    const view = el("map-view"); if (view) view.__centered = false;
+    grid.dataset.built = "5/" + g.x5 + "/" + g.y5;   // rebuilt when her location moves the window
   }
   // radar map: two fingers pinch to grow the map up to ~5x the view; one finger still pans it
   function setupRadarZoom() {
@@ -1954,89 +1952,93 @@
     el("map-zoom-reset").onclick = () => setZoom(1);
     view.__resetZoom = () => setZoom(1);
   }
-  // Fill the missing tiles of a frame, nearest-to-her first. 49 tiles at 6 concurrent
-  // finishes in a couple of seconds; no pacing needed at this scale.
-  function loadRadarFrame(jobs, gen) {
-    const CONC = 6;
-    let i = 0, inflight = 0;
-    (function pump() {
-      if (gen !== satGen) return;                       // frame changed (scrub) -> abandon this fill
-      while (inflight < CONC && i < jobs.length) {
-        const job = jobs[i]; i++; inflight++;
-        loadRadarTile(job, gen, () => { inflight--; pump(); });
-      }
-    })();
+  // Start (or reuse) the 4-tile download for one frame. When the LAST tile lands, the frame
+  // paints — atomically — if it's still the one being shown. A failed tile retries twice,
+  // then the frame is marked failed (shown as no radar, never a partial patchwork).
+  function radarFrameEntry(fr) {
+    let e = radarFrames.get(fr.path);
+    if (e) return e;
+    e = { imgs: [null, null, null, null], left: 4, ready: false, failed: false, map: radarMap };
+    radarFrames.set(fr.path, e);
+    R_OFF.forEach((d, i) => {
+      const url = state.rv.host + fr.path + "/" + R_SIZE + "/5/" + (radarMap.x5 + d[0]) + "/" + (radarMap.y5 + d[1]) + "/2/1_1.png";
+      (function load(attempt) {
+        const im = new Image();
+        im.onload = () => {
+          e.imgs[i] = im; e.left--;
+          if (!e.left) {
+            e.ready = true;
+            if (radarCtx && radarCtx.__frame === fr.path && e.map === radarMap) drawRadarFrame(e);
+          }
+        };
+        im.onerror = () => { if (attempt < 3) setTimeout(() => load(attempt + 1), 900 * attempt); else e.failed = true; };
+        im.src = url;
+      })(1);
+    });
+    return e;
   }
-  // Fetch one tile off-DOM; when it decodes, paint it straight onto the radar canvas —
-  // but only if the frame it belongs to is still the one on the canvas (gen guard), so a
-  // late arrival can never stamp an old frame's tile onto a newer frame. A straggler past
-  // the 8s timeout still paints if its frame is still current; an error leaves the cell
-  // clear until the next render.
-  function loadRadarTile(job, gen, done) {
-    const im = new Image(); let moved = false;
-    const move = () => { if (!moved) { moved = true; done(); } };   // advance the scheduler once
-    im.onload = () => {
-      radarTileCache.set(job.url, im);
-      if (radarTileCache.size > RADAR_CACHE_MAX) radarTileCache.delete(radarTileCache.keys().next().value);
-      if (gen === satGen && radarCtx) radarCtx.drawImage(im, job.gx * TILE, job.gy * TILE, TILE, TILE);
-      move();
-    };
-    im.onerror = move;
-    setTimeout(move, 8000);                                         // don't let one straggler stall the fan-out
-    im.src = job.url;
+  // One synchronous paint of a complete frame (or a clear) — the only way pixels reach the map.
+  function drawRadarFrame(e) {
+    const c = radarCtx; if (!c) return;
+    c.clearRect(0, 0, c.canvas.width, c.canvas.height);
+    if (e && e.ready) R_OFF.forEach((d, i) => c.drawImage(e.imgs[i], d[0] * R_SIZE, d[1] * R_SIZE, R_SIZE, R_SIZE));
+  }
+  // Warm the whole scrub history (19 frames x 4 tiles), newest first, gently staggered —
+  // after ~8s every frame swaps instantly and coherently. The Map dedupes across opens.
+  function prefetchRadarFrames() {
+    const frames = state.rv && state.rv.frames || [];
+    frames.slice().reverse().forEach((fr, i) => setTimeout(() => {
+      if (state.rv && radarMap) radarFrameEntry(fr);
+    }, 400 * i));
   }
   function updateSat() {
     const grid = el("map-grid"); if (!grid) return;
     const g = radarGridFor(state.loc.lat, state.loc.lon);
-    if (grid.dataset.built !== g.z + "/" + g.x0 + "/" + g.y0) buildRadarMap(g);
-    const m = mercXY(state.loc.lat, state.loc.lon, radarMap.z);
+    if (grid.dataset.built !== "5/" + g.x5 + "/" + g.y5) buildRadarMap(g);
+    const m = mercXY(state.loc.lat, state.loc.lon, 7);   // z7 = the base grid's tile space
     const frames = state.rv && state.rv.frames || [];
     el("sat-scrub").min = -(Math.max(1, frames.length) - 1);
     const idx = frames.length ? clamp(frames.length - 1 + (+el("sat-scrub").value), 0, frames.length - 1) : -1;
     const fr = idx >= 0 ? frames[idx] : null;
-    const gen = ++satGen;                            // a newer render abandons any in-flight fill
-    // Coherence by construction: the canvas is cleared and repainted from already-decoded
-    // images in ONE synchronous pass, so the visible pixels are only ever one frame (plus
-    // transparent cells still loading). Per-tile <img> swaps could never guarantee that \u2014
-    // an img keeps showing its old picture until its new download decodes.
-    const frameKey = fr ? fr.path : null;
-    const missing = [];
+    // One frame, one paint: a ready frame draws whole right now; a still-loading frame
+    // shows as blank radar and paints atomically the moment its 4th tile lands (the
+    // __frame check in radarFrameEntry). Partial patchwork cannot happen.
     if (radarCtx) {
-      if (radarCtx.__frame !== frameKey) {
-        radarCtx.clearRect(0, 0, radarCtx.canvas.width, radarCtx.canvas.height);
-        radarCtx.__frame = frameKey;
-      }
-      if (fr) {
-        for (const c of radarCells) {
-          const url = state.rv.host + fr.path + "/256/" + radarMap.z + "/" + c.tx + "/" + c.ty + "/2/1_1.png";
-          const im = radarTileCache.get(url);
-          if (im) radarCtx.drawImage(im, c.gx * TILE, c.gy * TILE, TILE, TILE);
-          else {
-            const dx = c.tx + 0.5 - m.xf, dy = c.ty + 0.5 - m.yf;
-            missing.push({ url: url, gx: c.gx, gy: c.gy, d: dx * dx + dy * dy });
-          }
-        }
-      }
+      radarCtx.__frame = fr ? fr.path : null;
+      const entry = fr ? radarFrameEntry(fr) : null;
+      drawRadarFrame(entry && entry.ready ? entry : null);
     }
-    if (missing.length) loadRadarFrame(missing.sort((a, b) => a.d - b.d), gen);
     // inline, not via a stylesheet selector — the canvas no longer lives inside the grid
     if (radarCtx) radarCtx.canvas.style.opacity = el("radar-toggle").textContent.indexOf("off") >= 0 ? "0" : "0.78";
     const pin = document.querySelector(".map-pin");
     if (pin) {
-      pin.style.left = ((m.xf - radarMap.x0) / radarMap.cols * 100) + "%";
-      pin.style.top = ((m.yf - radarMap.y0) / radarMap.rows * 100) + "%";
+      pin.style.left = ((m.xf - radarMap.x0) / radarMap.span * 100) + "%";
+      pin.style.top = ((m.yf - radarMap.y0) / radarMap.span * 100) + "%";
     }
     el("sat-time").textContent = fr
       ? fmtLocalTime(fr.time) + " \u00b7 " + Math.max(0, Math.round((Date.now() / 1000 - fr.time) / 60)) + " min ago"
       : "Radar loading";
-    const view = el("map-view");
-    if (view && !view.__centered) {
-      view.__centered = true;
-      requestAnimationFrame(() => {
-        view.scrollLeft = view.scrollWidth * ((m.xf - radarMap.x0) / radarMap.cols) - view.clientWidth / 2;
-        view.scrollTop = view.scrollHeight * ((m.yf - radarMap.y0) / radarMap.rows) - view.clientHeight / 2;
-      });
-    }
+  }
+  // Scroll the map so her pin sits mid-view — and KEEP it there through WebKit's
+  // post-open scroll wipes. For a while after a sheet opens, WebKit asynchronously
+  // resets the scroller to 0,0 (that's why she kept landing on a far corner of the
+  // map). A programmatic wipe still fires a 'scroll' event, so: write, then re-apply
+  // on any not-user scroll back to origin during a 4s settle window.
+  function centerRadar() {
+    const view = el("map-view"); if (!view || !radarMap) return;
+    const m = mercXY(state.loc.lat, state.loc.lon, 7);
+    let stable = 0, tries = 0, user = false;
+    const stop = () => { user = true; };
+    view.addEventListener("pointerdown", stop, { once: true });
+    (function keep() {
+      if (user) return;                      // she's panning — hers now
+      const L = view.scrollWidth * ((m.xf - radarMap.x0) / radarMap.span) - view.clientWidth / 2;
+      const T = view.scrollHeight * ((m.yf - radarMap.y0) / radarMap.span) - view.clientHeight / 2;
+      if (Math.abs(view.scrollLeft - L) <= 4 && Math.abs(view.scrollTop - T) <= 4) {
+        if (++stable >= 5) { view.removeEventListener("pointerdown", stop); return; }   // survived 5 frames — settled
+      } else { stable = 0; view.scrollLeft = L; view.scrollTop = T; }
+      if (++tries < 600) requestAnimationFrame(keep);
+    })();
   }
 
   function hourLabel(t, i) {
