@@ -177,6 +177,33 @@ def cmd_find_app(a):
     sys.exit(4)
 
 
+def cmd_revoke_api_dev_certs(a):
+    """Revoke ONLY development certs named exactly 'Created via API' (the throwaway
+    ones cloud signing mints each run). Never touches human-named or distribution
+    certs — that filter is the safety guarantee."""
+    token = make_token(a.p8, a.key_id, a.issuer)
+    s, body = api('GET', '/v1/certificates?limit=200', token)
+    _handle_auth(s, body)
+    targets = [d for d in (body.get('data') or [])
+               if 'DEVELOPMENT' in (d['attributes'].get('certificateType') or '')
+               and (d['attributes'].get('displayName') or '') == 'Created via API']
+    if not targets:
+        print("RESULT: NONE no 'Created via API' development certs to revoke")
+        return
+    revoked = 0
+    for d in targets:
+        cid = d['id']
+        rs, rb = api('DELETE', f'/v1/certificates/{cid}', token)
+        ok = rs in (200, 204)
+        print(f"  revoke {cid}: HTTP {rs} {'OK' if ok else rb}")
+        revoked += 1 if ok else 0
+    s, body = api('GET', '/v1/certificates?limit=200', token)
+    dev = [d for d in (body.get('data') or [])
+           if 'DEVELOPMENT' in (d['attributes'].get('certificateType') or '')]
+    print(f"RESULT: REVOKED {revoked}; development certs remaining: {len(dev)} "
+          f"(kept: {[d['attributes'].get('displayName') for d in dev]})")
+
+
 def main():
     p = argparse.ArgumentParser(description="App Store Connect setup helper")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -195,6 +222,8 @@ def main():
     sp = sub.add_parser("find-app"); net(sp)
     sp.add_argument("--bundle-id", required=True)
     sp.set_defaults(func=cmd_find_app)
+    sp = sub.add_parser("revoke-api-dev-certs"); net(sp)
+    sp.set_defaults(func=cmd_revoke_api_dev_certs)
 
     args = p.parse_args()
     args.func(args)

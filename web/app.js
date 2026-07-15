@@ -1862,6 +1862,13 @@
   // the whole continental US at zoom 7; tiles load lazily as she scrolls
   const US = { z: 7, x0: 18, x1: 39, y0: 43, y1: 53 };
   let radarImgs = [];
+  // On Android/web a service worker cached radar tiles, so a frame's 242 tiles resolved instantly
+  // and in step. iOS file:// can't run the SW, so updateSat() preloads a whole frame off-DOM and
+  // commits every tile at once (below); this Map lets repeat frames in a session skip the network.
+  // It holds URL strings only (not Image objects) so memory stays tiny — decoded bitmaps are the
+  // browser's to keep or evict.
+  const radarTileCache = new Map();
+  let satGen = 0;
   function buildUsMap() {
     const grid = el("map-grid");
     const cols = US.x1 - US.x0 + 1, rows = US.y1 - US.y0 + 1;
@@ -1928,6 +1935,20 @@
     el("map-zoom-reset").onclick = () => setZoom(1);
     view.__resetZoom = () => setZoom(1);
   }
+  // Load one tile off-DOM; resolves (never rejects) on decode, error, or a 4s timeout so one slow
+  // straggler can't stall the frame swap. ponytail: relies on the browser HTTP cache keeping the PNG
+  // after the throwaway Image is GC'd — evictable, but fine for a short radar session.
+  function preloadRadarTile(url) {
+    if (radarTileCache.has(url)) return Promise.resolve();
+    return new Promise(resolve => {
+      const im = new Image(); let done = false;
+      const fin = () => { if (!done) { done = true; resolve(); } };
+      im.onload = () => { radarTileCache.set(url, true); fin(); };
+      im.onerror = fin;
+      setTimeout(fin, 4000);
+      im.src = url;
+    });
+  }
   function updateSat() {
     const grid = el("map-grid"); if (!grid) return;
     if (grid.dataset.built !== "us") buildUsMap();
@@ -1936,12 +1957,24 @@
     el("sat-scrub").min = -(Math.max(1, frames.length) - 1);
     const idx = frames.length ? clamp(frames.length - 1 + (+el("sat-scrub").value), 0, frames.length - 1) : -1;
     const fr = idx >= 0 ? frames[idx] : null;
-    for (const rad of radarImgs) {
-      if (fr) {
-        const url = state.rv.host + fr.path + "/256/" + US.z + "/" + rad.__tx + "/" + rad.__ty + "/2/1_1.png";
-        rad.__want = url; rad.__err = 0;
-        if (rad.src !== url) rad.src = url;          // unchanged frames stay put (browser/SW cache, no refetch)
-      } else { rad.__want = null; rad.removeAttribute("src"); }
+    const gen = ++satGen;                            // a newer scrub cancels this frame's pending commit
+    if (!fr) {
+      for (const rad of radarImgs) { rad.__want = null; rad.removeAttribute("src"); }
+    } else {
+      // Preload the WHOLE frame, THEN swap every tile at once — never a half-old/half-new mosaic.
+      // (The old code set each .src independently, so on uncached iOS fetches the 242 tiles landed at
+      // random times -> "strips of random tiles". Android's SW cache hid it by loading them instantly.)
+      const jobs = radarImgs.map(rad => ({
+        rad,
+        url: state.rv.host + fr.path + "/256/" + US.z + "/" + rad.__tx + "/" + rad.__ty + "/2/1_1.png",
+      }));
+      Promise.all(jobs.map(j => preloadRadarTile(j.url))).then(() => {
+        if (gen !== satGen) return;                  // a newer frame was requested meanwhile
+        for (const { rad, url } of jobs) {
+          rad.__want = url; rad.__err = 0;
+          if (rad.src !== url) rad.src = url;         // from cache now -> all tiles swap together
+        }
+      });
     }
     grid.classList.toggle("radar-off", el("radar-toggle").textContent.indexOf("off") >= 0);
     const cols = US.x1 - US.x0 + 1, rows = US.y1 - US.y0 + 1;
