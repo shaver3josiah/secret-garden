@@ -1,4 +1,7 @@
-const CACHE = "secret-garden-v29";
+const CACHE = "secret-garden-v30";
+// unversioned on purpose: the radar/tile history must SURVIVE app updates — the old
+// CACHE+"-data" name was wiped by every version bump, killing offline radar each release
+const DATA = "secret-garden-data";
 const SHELL = [
   "./",
   "./index.html",
@@ -36,7 +39,7 @@ self.addEventListener("install", (e) => {
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE && k !== CACHE + "-data").map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k !== CACHE && k !== DATA).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -44,7 +47,11 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (url.origin === self.location.origin) {
-    e.respondWith(caches.match(e.request).then((r) => r || fetch(e.request)));
+    e.respondWith(caches.match(e.request).then((r) => r || fetch(e.request).catch((err) => {
+      // offline with an evicted/missing cache entry: at least hand navigations the shell
+      if (e.request.mode === "navigate") return caches.match("./index.html");
+      throw err;
+    })));
     return;
   }
   if (NO_STORE.some((h) => url.hostname === h)) {
@@ -54,8 +61,23 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     fetch(e.request).then((res) => {
       const copy = res.clone();
-      caches.open(CACHE + "-data").then((c) => c.put(e.request, copy));
+      caches.open(DATA).then((c) => c.put(e.request, copy).then(() => trimData(c))).catch(() => {});
       return res;
     }).catch(() => caches.match(e.request))
   );
 });
+
+// Opaque tile responses carry heavy quota padding, and radar frame URLs rotate every
+// ~10 minutes — unbounded, this cache eventually trips origin quota and the browser
+// can evict EVERYTHING (shell included: app won't start offline). Cap it.
+// ponytail: FIFO trim, no LRU — the oldest entries are expired radar frames anyway
+const MAX_DATA = 600;
+let trimming = false;
+function trimData(c) {
+  if (trimming) return;
+  trimming = true;
+  c.keys()
+    .then((keys) => Promise.all(keys.slice(0, keys.length - MAX_DATA).map((k) => c.delete(k))))
+    .catch(() => {})
+    .then(() => { trimming = false; });
+}

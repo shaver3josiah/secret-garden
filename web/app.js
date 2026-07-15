@@ -1801,16 +1801,45 @@
       persist(); updateConditions();
     } catch (e) {}
   }
-  async function fetchRadar() {
+  // Last good frame index, stashed under its own key (refetched data, not garden state).
+  // The iOS/Android shells have no service worker, so this is their offline radar: the
+  // index itself is no-cache, but the tiles it points to are HTTP-cached for 2 days by
+  // WebKit/WebView, so a recent stash replays straight from the device's disk cache.
+  const RV_KEY = "secret-garden-rv";
+  const RV_STASH_MAX_AGE = 3 * 3600 * 1000;   // ponytail: older rain isn't worth replaying, even age-labeled
+  function stashRv() { try { localStorage.setItem(RV_KEY, JSON.stringify({ host: state.rv.host, frames: state.rv.frames, at: Date.now() })); } catch (e) {} }
+  function unstashRv() {
     try {
-      const r = await fetch("https://api.rainviewer.com/public/weather-maps.json"); if (!r.ok) return;
-      const j = await r.json();
-      if (j.radar && j.radar.past && j.radar.past.length) {
+      const s = JSON.parse(localStorage.getItem(RV_KEY));
+      if (s && s.host && s.frames && s.frames.length && Date.now() - s.at < RV_STASH_MAX_AGE) return { host: s.host, frames: s.frames };
+    } catch (e) {}
+    return null;
+  }
+  async function fetchRadar() {
+    let got = false;
+    try {
+      const r = await fetch("https://api.rainviewer.com/public/weather-maps.json");
+      const j = r.ok ? await r.json() : null;
+      if (j && j.radar && j.radar.past && j.radar.past.length) {
         state.rv = { host: j.host, frames: j.radar.past.slice(-19) };   // up to ~3 hours of frames
+        stashRv();
+        const live = new Set(state.rv.frames.map(f => f.path));
+        radarFrames.forEach((v, k) => { if (!live.has(k)) radarFrames.delete(k); });   // expired frames let go of their tiles
         updateSat();
         prefetchRadarFrames();   // warm the whole scrub history: 4 small tiles per frame
+        got = true;
       }
     } catch (e) {}
+    if (!got && !state.rv) {
+      const s = unstashRv();   // nothing came back: replay the last picture from the tile cache
+      if (s) { state.rv = s; updateSat(); prefetchRadarFrames(); got = true; }
+    }
+    // No frames at all, no stash: say so instead of "Radar loading" forever.
+    // (With old frames still up, silence is kinder — the 5-min refresh will catch up.)
+    if (!got && !state.rv) {
+      const t = el("sat-time");
+      if (t) t.textContent = "The radar is out of reach — tap the map to try again";
+    }
   }
   async function geocode(q) {
     try {
@@ -1832,7 +1861,12 @@
       return { lat: +g.latitude.toFixed(4), lon: +g.longitude.toFixed(4), place: g.name + (g.admin1 ? ", " + g.admin1 : "") };
     } catch (e) { return null; }
   }
-  function refreshData() { fetchWeather(); fetchDaily(); fetchAqi(); }   // radar loads only when she opens it
+  function refreshData() {
+    fetchWeather(); fetchDaily(); fetchAqi();
+    // radar refreshes only while she's actually watching it — closed sheet costs nothing (battery)
+    const rs = el("sheet-radar");
+    if (rs && rs.classList.contains("open")) fetchRadar();
+  }
 
   function openRadar() {
     openSheet("radar");
@@ -1907,10 +1941,14 @@
     const bctx = base.getContext("2d");
     const gen = ++baseGen;
     for (let gy = 0; gy < g.span; gy++) for (let gx = 0; gx < g.span; gx++) {
-      const im = new Image();
       const dx = gx * 256, dy = gy * 256;
-      im.onload = () => { if (gen === baseGen) bctx.drawImage(im, dx, dy, 256, 256); };
-      im.src = "https://tile.openstreetmap.org/7/" + (g.x0 + gx) + "/" + (g.y0 + gy) + ".png";
+      const url = "https://tile.openstreetmap.org/7/" + (g.x0 + gx) + "/" + (g.y0 + gy) + ".png";
+      (function load(attempt) {   // same retry-with-backoff as the radar tiles — no permanent holes in the map
+        const im = new Image();
+        im.onload = () => { if (gen === baseGen) bctx.drawImage(im, dx, dy, 256, 256); };
+        im.onerror = () => { if (attempt < 3 && gen === baseGen) setTimeout(() => load(attempt + 1), 900 * attempt); };
+        im.src = url;
+      })(1);
     }
     const cv = document.createElement("canvas");
     cv.className = "radar-canvas";
@@ -1963,6 +2001,7 @@
   // then the frame is marked failed (shown as no radar, never a partial patchwork).
   function radarFrameEntry(fr) {
     let e = radarFrames.get(fr.path);
+    if (e && e.failed) { radarFrames.delete(fr.path); e = null; }   // a failed frame retries next time it's asked for
     if (e) return e;
     e = { imgs: [null, null, null, null], left: 4, ready: false, failed: false, map: radarMap };
     radarFrames.set(fr.path, e);
@@ -1974,7 +2013,8 @@
           e.imgs[i] = im; e.left--;
           if (!e.left) {
             e.ready = true;
-            if (radarCtx && radarCtx.__frame === fr.path && e.map === radarMap) drawRadarFrame(e);
+            // updateSat paints the completed frame AND drops the "loading" note from the time label
+            if (radarCtx && radarCtx.__frame === fr.path && e.map === radarMap) updateSat();
           }
         };
         im.onerror = () => { if (attempt < 3) setTimeout(() => load(attempt + 1), 900 * attempt); else e.failed = true; };
@@ -1994,7 +2034,8 @@
   function prefetchRadarFrames() {
     const frames = state.rv && state.rv.frames || [];
     frames.slice().reverse().forEach((fr, i) => setTimeout(() => {
-      if (state.rv && radarMap) radarFrameEntry(fr);
+      const rs = el("sheet-radar");   // close the sheet, stop the downloads — tiles load only while open
+      if (state.rv && radarMap && rs && rs.classList.contains("open")) radarFrameEntry(fr);
     }, 400 * i));
   }
   function updateSat() {
@@ -2009,9 +2050,10 @@
     // One frame, one paint: a ready frame draws whole right now; a still-loading frame
     // shows as blank radar and paints atomically the moment its 4th tile lands (the
     // __frame check in radarFrameEntry). Partial patchwork cannot happen.
+    let entry = null;
     if (radarCtx) {
       radarCtx.__frame = fr ? fr.path : null;
-      const entry = fr ? radarFrameEntry(fr) : null;
+      entry = fr ? radarFrameEntry(fr) : null;
       drawRadarFrame(entry && entry.ready ? entry : null);
     }
     // inline, not via a stylesheet selector — the canvas no longer lives inside the grid
@@ -2023,6 +2065,7 @@
     }
     el("sat-time").textContent = fr
       ? fmtLocalTime(fr.time) + " \u00b7 " + Math.max(0, Math.round((Date.now() / 1000 - fr.time) / 60)) + " min ago"
+        + (entry && !entry.ready ? " \u00b7 loading" : "")   // blank canvas \u2260 clear skies \u2014 say which it is
       : "Radar loading";
   }
   // Scroll the map so her pin sits mid-view — and KEEP it there through WebKit's
@@ -3107,6 +3150,9 @@
       if (now - satThrottle >= 130) { satThrottle = now; updateSat(); }
     };
     el("sat-scrub").addEventListener("change", updateSat);   // and always render the frame she lands on
+    // recovery from "radar is out of reach": a tap on the map (or the time label) refetches
+    el("map-view").addEventListener("pointerup", () => { if (!state.rv) fetchRadar(); });
+    el("sat-time").onclick = () => fetchRadar();
     el("radar-toggle").onclick = () => {
       // (was toggling #sat-radar, an element that no longer exists — it threw on every tap)
       const btn = el("radar-toggle");
