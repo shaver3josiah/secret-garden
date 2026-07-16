@@ -96,11 +96,13 @@ jobs:
           command -v fastlane >/dev/null 2>&1 || gem install fastlane --no-document
           ruby -e '
             require "spaceship"
-            Spaceship::ConnectAPI.auth(
-              key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
-              issuer_id: ENV.fetch("APP_STORE_CONNECT_ISSUER_ID"),
-              key_filepath: ENV.fetch("ASC_KEY_PATH")
-            )
+            creds = { key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
+                      issuer_id: ENV.fetch("APP_STORE_CONNECT_ISSUER_ID") }
+            begin   # fastlane renamed this kwarg across versions; accept either
+              Spaceship::ConnectAPI.auth(filepath: ENV.fetch("ASC_KEY_PATH"), **creds)
+            rescue ArgumentError
+              Spaceship::ConnectAPI.auth(key_filepath: ENV.fetch("ASC_KEY_PATH"), **creds)
+            end
             doomed = Spaceship::ConnectAPI::Certificate.all.select do |c|
               c.certificate_type == "DEVELOPMENT" && c.display_name == "Created via API"
             end
