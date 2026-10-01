@@ -1,4 +1,4 @@
-const CACHE = "secret-garden-v30";
+const CACHE = "secret-garden-v32";
 // unversioned on purpose: the radar/tile history must SURVIVE app updates — the old
 // CACHE+"-data" name was wiped by every version bump, killing offline radar each release
 const DATA = "secret-garden-data";

@@ -4,6 +4,7 @@
   const cv = document.getElementById("scene");
   const ctx = cv.getContext("2d");
   let W = 0, H = 0, U = 0, DPR = 1, horizonY = 0, T = 0, lastTs = 0;
+  let FK = 1;   // this frame's length in old 50ms idle frames: per-frame motion scales by it
 
   const KEY = "secret-garden-state";
   function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
@@ -40,6 +41,8 @@
     favs: store.favs || [],
     loc2: store.loc2 || null,
     hourly2: store.hourly2 || null,
+    week: store.week || null,
+    week2: store.week2 || null,
     rv: null,
     curVerse: null,
     versePaused: false,
@@ -83,7 +86,7 @@
   }
 
   function persist() {
-    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, daily: state.daily, sun: state.sun, aqi: state.aqi, trip: state.trip, favs: state.favs, loc2: state.loc2, hourly2: state.hourly2 });
+    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, daily: state.daily, sun: state.sun, aqi: state.aqi, trip: state.trip, favs: state.favs, loc2: state.loc2, hourly2: state.hourly2, week: state.week, week2: state.week2 });
   }
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -321,6 +324,7 @@
     for (let i = 0; i < starN; i++) g.stars.push({ x: (r() * 1.7 - 0.35) * W, y: r() * horizonY * 0.92, r: 0.5 + r() * 1.2, ph: r() * 6.28 });
 
     geo = g;
+    floraT = -1e9;   // new plantings show on the very next frame, even with the scene paused
     initParticles();
     layoutVerse();
   }
@@ -564,9 +568,12 @@
   }
   // ponytail: clouds part for 90s after a double-tap, then drift back
   let clearK = 0, clearUntil = 0;
+  let fadeT = -1;
   function cloudFade() {
+    if (fadeT === T) return 1 - clearK;   // called by both cloud layers: step once per frame
+    fadeT = T;
     const target = Date.now() < clearUntil ? 1 : 0;
-    clearK += (target - clearK) * 0.03;
+    clearK += (target - clearK) * (1 - Math.pow(0.97, FK));
     if (clearK < 0.002) clearK = 0;
     return 1 - clearK;
   }
@@ -579,7 +586,7 @@
   function drawClouds() {
     cloudFade();
     for (const c of clouds) {
-      if (motionOn()) { c.x += c.sp * (1 + state.weather.wind / 30); if (c.x - 80 * c.s > W) c.x = -90 * c.s; }
+      if (motionOn()) { c.x += c.sp * (1 + state.weather.wind / 30) * FK; if (c.x - 80 * c.s > W) c.x = -90 * c.s; }
       const px = c.x + partShift(c.x);
       if (px > -140 * c.s && px < W + 140 * c.s) puff(px, c.y + 30, c.s, c.op * (1 - clearK * 0.25));
     }
@@ -1030,7 +1037,7 @@
   const gctx = gcv.getContext("2d");
   let gFrame = 0;
   // ponytail: two quality tiers, switched by measured frame time — no settings, no drama
-  let ftAvg = 16, floraEvery = 2, perfTier = 0, tierCheck = 0;
+  let ftAvg = 16, floraT = -1e9, perfTier = 0, tierCheck = 0;
   function drawGardenScene() {
     if (!L) return;
     const P = gePalette(), t = motionOn() ? T * 0.001 : 0, wind = windAmp() || 0.35;
@@ -1042,7 +1049,11 @@
       gcv.width = bw; gcv.height = bh;
       gFrame = 0;
     }
-    if (gFrame % floraEvery === 0 || gFrame === 1) {
+    // the flora layer is the heaviest paint: it keeps its own clock (15fps, 10 on slow phones,
+    // ~1/s when the scene is still) however fast the sky frame runs
+    const floraMs = !motionOn() ? 1000 : perfTier ? 100 : 66;
+    if (T - floraT >= floraMs - 4 || gFrame === 1) {
+      floraT = T;
       gctx.setTransform(FDPR, 0, 0, FDPR, W * 0.4 * FDPR, 0);
       gctx.clearRect(-W * 0.4, 0, W * 1.8, H);
       paintFlora(gctx, P, t, wind);
@@ -1320,7 +1331,7 @@
       const baseY = horizonY * (0.16 + Math.random() * 0.4), loop = Math.random() < 0.35, size = U * (0.02 + Math.random() * 0.012);
       for (let i = 0; i < n; i++) gulls.push({ x: dir > 0 ? -30 - i * 34 : W + 30 + i * 34, y: baseY + i * 13 + (Math.random() - 0.5) * 18, dir: dir, spd: 0.3 + Math.random() * 0.22, ph: Math.random() * 6.28, size: size, loop: loop });
     }
-    for (const g of gulls) { g.x += g.dir * g.spd * dt * 0.05; if (g.loop) g.y += Math.sin(g.x * 0.012 + g.ph) * 0.28; }
+    for (const g of gulls) { g.x += g.dir * g.spd * dt * 0.05; if (g.loop) g.y += Math.sin(g.x * 0.012 + g.ph) * 0.28 * FK; }
     gulls = gulls.filter(g => g.x > -50 && g.x < W + 50);
   }
   function drawGulls() {
@@ -1429,7 +1440,7 @@
     }
     if (th.ambient === "petals") {
       for (const p of petals) {
-        if (motionOn()) { p.y += p.sp; p.x += Math.sin(T * 0.001 + p.y * 0.01) * 0.5 + p.drift; p.rot += p.rs; if (p.y > H + 10) { p.y = -10; p.x = Math.random() * W; } }
+        if (motionOn()) { p.y += p.sp * FK; p.x += (Math.sin(T * 0.001 + p.y * 0.01) * 0.5 + p.drift) * FK; p.rot += p.rs * FK; if (p.y > H + 10) { p.y = -10; p.x = Math.random() * W; } }
         ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.globalAlpha = 0.85;
         ctx.fillStyle = p.col;
         ctx.beginPath(); ctx.ellipse(0, 0, p.r, p.r * 0.55, 0, 0, 6.2832); ctx.fill();
@@ -1438,7 +1449,7 @@
       ctx.globalAlpha = 1;
     } else if (th.ambient === "pollen") {
       for (const p of pollen) {
-        if (motionOn()) { p.y -= p.sp; p.x += Math.sin(T * 0.0012 + p.ph) * 0.4; if (p.y < horizonY * 0.4) { p.y = H; p.x = Math.random() * W; } }
+        if (motionOn()) { p.y -= p.sp * FK; p.x += Math.sin(T * 0.0012 + p.ph) * 0.4 * FK; if (p.y < horizonY * 0.4) { p.y = H; p.x = Math.random() * W; } }
         ctx.globalAlpha = 0.4 + 0.3 * Math.sin(T * 0.002 + p.ph);
         ctx.fillStyle = "rgba(246,226,150,0.9)";
         ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.2832); ctx.fill();
@@ -1446,7 +1457,7 @@
       ctx.globalAlpha = 1;
     } else if (th.ambient === "fireflies" && nf > 0.25) {
       for (const fl of flies) {
-        if (motionOn()) { fl.x += fl.dx; fl.y += fl.dy; if (Math.random() < 0.02) { fl.dx = (Math.random() - 0.5) * 0.5; fl.dy = (Math.random() - 0.5) * 0.5; } if (fl.x < 0 || fl.x > W) fl.dx *= -1; if (fl.y < horizonY * 0.6 || fl.y > H) fl.dy *= -1; }
+        if (motionOn()) { fl.x += fl.dx * FK; fl.y += fl.dy * FK; if (Math.random() < 0.02 * FK) { fl.dx = (Math.random() - 0.5) * 0.5; fl.dy = (Math.random() - 0.5) * 0.5; } if (fl.x < 0 || fl.x > W) fl.dx *= -1; if (fl.y < horizonY * 0.6 || fl.y > H) fl.dy *= -1; }
         const glow = (0.4 + 0.6 * Math.abs(Math.sin(T * 0.003 + fl.ph))) * nf;
         ctx.globalAlpha = glow;
         ctx.drawImage(glowSprite(), fl.x - 8, fl.y - 8);
@@ -1461,13 +1472,13 @@
       ctx.strokeStyle = "rgba(174,196,214,0.55)"; ctx.lineWidth = 1.2;
       const wx = state.weather.wind / 8;
       for (const d of rain) {
-        if (motionOn()) { d.y += d.sp; d.x += wx; if (d.y > H) { d.y = -10; d.x = Math.random() * W; } }
+        if (motionOn()) { d.y += d.sp * FK; d.x += wx * FK; if (d.y > H) { d.y = -10; d.x = Math.random() * W; } }
         ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - wx, d.y + d.len); ctx.stroke();
       }
     } else if (k === "snow") {
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       for (const s of snow) {
-        if (motionOn()) { s.y += s.sp; s.x += Math.sin(T * 0.001 + s.ph) * 0.6; if (s.y > H) { s.y = -6; s.x = Math.random() * W; } }
+        if (motionOn()) { s.y += s.sp * FK; s.x += Math.sin(T * 0.001 + s.ph) * 0.6 * FK; if (s.y > H) { s.y = -6; s.x = Math.random() * W; } }
         ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.2832); ctx.fill();
       }
       ctx.globalAlpha = 1;
@@ -1489,8 +1500,8 @@
       ctx.fillStyle = g; ctx.fillRect(-W * 0.4, horizonY - H * 0.2, W * 1.8, H - horizonY + H * 0.2);
     }
     if (state.weather.code >= 95 && motionOn() && state.settings.skyMode !== "cycle") {
-      if (Math.random() < 0.004) flashT = 1;
-      if (flashT > 0) { ctx.fillStyle = "rgba(255,255,255," + (flashT * 0.35) + ")"; ctx.fillRect(0, 0, W, horizonY); flashT -= 0.08; }
+      if (Math.random() < 0.004 * FK) flashT = 1;
+      if (flashT > 0) { ctx.fillStyle = "rgba(255,255,255," + (flashT * 0.35) + ")"; ctx.fillRect(0, 0, W, horizonY); flashT -= 0.08 * FK; }
     }
   }
 
@@ -1530,8 +1541,11 @@
     if (line) lines.push(line);
     sky.lines = lines;
     sky.ref = v.ref;
+    sky.gen = (sky.gen || 0) + 1;   // new layout (verse, size, or late web font) = new text sprite
     sky.tw = 0;
     for (const l of lines) sky.tw = Math.max(sky.tw, ctx.measureText(l).width);
+    ctx.font = "600 " + Math.max(11, Math.round(sky.fs * 0.44)) + "px 'DM Sans', sans-serif";
+    sky.rw = ctx.measureText(v.ref.toUpperCase()).width;   // a long reference under a short verse
     ctx.restore();
     const block = lines.length * sky.lh + sky.fs;
     sky.y = clamp(horizonY * 0.4, 120, Math.max(130, horizonY - block * 0.5 - U * 0.06));
@@ -1569,22 +1583,26 @@
     const coverW = sky.tw + sky.fs * 0.4;
     const coverH = boxBot - boxTop;
     drawVerseCloud(cxp, (boxTop + boxBot) / 2, coverW, coverH, sky.cseed || 7, a, nightMode);
-    ctx.save();
+    // the text (and its soft shadow) is painted once per verse at full device resolution, then
+    // blitted: no per-frame blur pass, and the slow drift glides on sub-pixels instead of snapping
+    const padX = sky.fs * 0.5, top = sky.fs * 1.1, tw = Math.max(sky.tw, sky.rw || 0) + padX * 2, th = boxBot - boxTop + sky.fs * 0.6;
+    const spr = sprite("vtext:" + sky.gen + ":" + (nightMode ? 1 : 0) + ":" + DPR, tw * DPR, th * DPR, (g2) => {
+      g2.scale(DPR, DPR);
+      g2.textAlign = "center";
+      g2.textBaseline = "alphabetic";
+      g2.font = verseFont(sky.fs);
+      g2.shadowColor = "rgba(40,60,30,0.16)";
+      g2.shadowBlur = sky.fs * 0.16;   // device px, exactly as before (shadowBlur ignores the transform)
+      g2.fillStyle = nightMode ? "#2B3440" : "#243420";
+      for (let i = 0; i < nL; i++) g2.fillText(sky.lines[i], tw / 2, top + i * sky.lh);
+      g2.shadowBlur = 0;
+      g2.font = "600 " + Math.max(11, Math.round(sky.fs * 0.44)) + "px 'DM Sans', sans-serif";
+      g2.fillStyle = "#9A7636";
+      g2.fillText(sky.ref.toUpperCase(), tw / 2, top + (nL - 1) * sky.lh + sky.fs * 1.25);
+    });
     ctx.globalAlpha = a;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "alphabetic";
-    ctx.font = verseFont(sky.fs);
-    ctx.shadowColor = "rgba(40,60,30,0.16)";
-    ctx.shadowBlur = sky.fs * 0.16;
-    ctx.fillStyle = nightMode ? "#2B3440" : "#243420";
-    for (let i = 0; i < sky.lines.length; i++) {
-      ctx.fillText(sky.lines[i], cxp, yTop + i * sky.lh);
-    }
-    ctx.shadowBlur = 0;
-    ctx.font = "600 " + Math.max(11, Math.round(sky.fs * 0.44)) + "px 'DM Sans', sans-serif";
-    ctx.fillStyle = "#9A7636";
-    ctx.fillText(sky.ref.toUpperCase(), cxp, yTop + (sky.lines.length - 1) * sky.lh + sky.fs * 1.25);
-    ctx.restore();
+    ctx.drawImage(spr, cxp - tw / 2, yTop - top, tw, th);
+    ctx.globalAlpha = 1;
   }
 
   const perfNow = () => (window.performance && performance.now) ? performance.now() : (T || 0);
@@ -1594,19 +1612,23 @@
     if (document.hidden) return;                    // the browser pauses rAF when hidden; guard anyway
     // battery: cap the frame rate. The scene is atmospheric — 40fps while she interacts, 26 while it
     // breathes on its own, a trickle when everything is still. A capped loop draws far less than 60fps.
+    // Full display rate while her finger is on it; an even 30 (every 2nd vsync, no judder) while
+    // it breathes. Motion is time-based (FK), so speeds don't change with the rate.
     const active = dragY !== null || cam > 0.001 || camTarget > 0.001 || Math.abs(panX - panTarget) > 0.5 || pinching || zoomScale > 1.01;
-    const fps = active ? 40 : (motionOn() ? 26 : 6);
-    if (now - T < 1000 / fps - 1.5) return;
+    const fps = active ? 60 : (motionOn() ? 30 : 6);
+    if (now - T < 1000 / fps - 2) return;
     lastTs = T; T = now;
+    FK = clamp((T - lastTs) / 50, 0, 3);
     const t0 = perfNow();
 
+    const ck = FK * 1.5;                            // the spring/pan constants were tuned per 33ms frame
     if (dragY === null && (cam > 0.0005 || camTarget > 0)) {
-      camVel += (camTarget - cam) * 0.026;          // soft spring, settles ~600ms
-      camVel *= 0.86;
-      cam = clamp(cam + camVel, 0, 1);
+      camVel += (camTarget - cam) * 0.026 * ck;     // soft spring, settles ~600ms
+      camVel *= Math.pow(0.86, ck);
+      cam = clamp(cam + camVel * ck, 0, 1);
       if (Math.abs(cam - camTarget) < 0.001 && Math.abs(camVel) < 0.0005) { cam = camTarget; camVel = 0; }
     }
-    if (dragAxis !== "h") panX += (panTarget - panX) * 0.12;
+    if (dragAxis !== "h") panX += (panTarget - panX) * (1 - Math.pow(0.88, ck));
     ctx.clearRect(0, 0, W, H);
     const oy = camOffset();
     drawZenith(oy);
@@ -1642,8 +1664,8 @@
     if (drawMs >= 0 && drawMs < 400) ftAvg += (drawMs - ftAvg) * 0.05;
     if (++tierCheck >= 120) {
       tierCheck = 0;
-      if (perfTier === 0 && ftAvg > 24) { perfTier = 1; floraEvery = 3; initParticles(); }
-      else if (perfTier === 1 && ftAvg < 12) { perfTier = 0; floraEvery = 2; initParticles(); }
+      if (perfTier === 0 && ftAvg > 20) { perfTier = 1; initParticles(); }
+      else if (perfTier === 1 && ftAvg < 10) { perfTier = 0; initParticles(); }
     }
   }
 
@@ -1711,7 +1733,7 @@
   function updateConditions() {
     el("cond-place").textContent = state.loc.place;
     const w = wxLabel(state.weather.code);
-    el("cond-wx-glyph").textContent = w[1];
+    el("cond-wx-glyph").innerHTML = wxIcon(state.weather.code, !state.weather.isDay, 20);
     el("cond-wx-text").innerHTML = (state.weather.temp != null ? "<b>" + state.weather.temp + "°</b> " : "") + w[0];
     const gq = (q) => "https://www.google.com/search?q=" + encodeURIComponent(q + " " + state.loc.place);
     el("temp-link").href = gq("weather");
@@ -1735,7 +1757,7 @@
   async function fetchWeather() {
     try {
       const { lat, lon } = state.loc;
-      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&current=temperature_2m,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,is_day,precipitation&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m&daily=sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=2";
+      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&current=temperature_2m,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,is_day,precipitation&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m&daily=sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=7";
       const r = await fetch(url); if (!r.ok) throw 0;
       const j = await r.json(), c = j.current;
       state.weather = { code: c.weather_code, temp: Math.round(c.temperature_2m), cloud: c.cloud_cover, wind: c.wind_speed_10m, windDir: c.wind_direction_10m, isDay: c.is_day, precip: c.precipitation };
@@ -1746,15 +1768,23 @@
         if (i0 < 0) i0 = 0;
         const take = (arr) => arr.slice(i0, i0 + 24);
         state.hourly = { t: take(hh.time), tp: take(hh.temperature_2m), at: take(hh.apparent_temperature), pp: take(hh.precipitation_probability), pr: take(hh.precipitation), code: take(hh.weather_code), cc: take(hh.cloud_cover), ws: take(hh.wind_speed_10m), wd: take(hh.wind_direction_10m), wg: take(hh.wind_gusts_10m) };
+        state.week = weekOf(j, i0);
       }
       persist(); updateConditions(); initParticles(); renderHours();
       if (state.loc2) fetchHourly2();
     } catch (e) { updateConditions(); }
   }
+  // The whole week, hour by hour from midnight today, for the swipeable temperature days.
+  // `now` = this hour's index; sr/ss = each day's sunrise/sunset in minutes (night icons).
+  function weekOf(j, i0) {
+    const hh = j.hourly, d = j.daily || {};
+    return { t: hh.time, tp: hh.temperature_2m, at: hh.apparent_temperature, pp: hh.precipitation_probability, code: hh.weather_code, now: i0, off: j.utc_offset_seconds,
+      sr: (d.sunrise || []).map(minutesOf), ss: (d.sunset || []).map(minutesOf) };
+  }
   async function fetchHourly2() {
     if (!state.loc2) return;
     try {
-      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + state.loc2.lat + "&longitude=" + state.loc2.lon + "&current=temperature_2m&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=2";
+      const url = "https://api.open-meteo.com/v1/forecast?latitude=" + state.loc2.lat + "&longitude=" + state.loc2.lon + "&current=temperature_2m&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m&daily=sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=7";
       const r = await fetch(url); if (!r.ok) return;
       const j = await r.json(), hh = j.hourly;
       if (!hh || !hh.time) return;
@@ -1762,6 +1792,7 @@
       if (i0 < 0) i0 = 0;
       const take = (arr) => arr.slice(i0, i0 + 24);
       state.hourly2 = { t: take(hh.time), tp: take(hh.temperature_2m), at: take(hh.apparent_temperature), pp: take(hh.precipitation_probability), pr: take(hh.precipitation), code: take(hh.weather_code), cc: take(hh.cloud_cover), ws: take(hh.wind_speed_10m), wd: take(hh.wind_direction_10m), wg: take(hh.wind_gusts_10m) };
+      state.week2 = weekOf(j, i0);
       persist(); renderHours();
     } catch (e) {}
   }
@@ -1815,31 +1846,69 @@
     } catch (e) {}
     return null;
   }
+  // a request that hangs (weak cell signal) fails after `ms` instead of leaving "loading" up forever
+  function fetchT(url, ms) {
+    const ac = window.AbortController ? new AbortController() : null;
+    const t = ac && setTimeout(() => ac.abort(), ms);
+    return fetch(url, ac ? { signal: ac.signal } : undefined).finally(() => clearTimeout(t));
+  }
+  function radarOpen() { const rs = el("sheet-radar"); return !!(rs && rs.classList.contains("open")); }
+  function setRadarFrames(host, frames) {
+    state.rv = { host: host, frames: frames };
+    stashRv();
+    const live = new Set(frames.map(f => f.path));
+    radarFrames.forEach((v, k) => { if (!live.has(k)) radarFrames.delete(k); });   // expired frames let go of their tiles
+    updateSat();
+    prefetchRadarFrames();   // warm the whole scrub history: 4 tiles per frame
+  }
+  // Backup source: NOAA's NEXRAD composite, served by Iowa State's mesonet (free, no key, US only).
+  // Timestamped layers are immutable, so it caches like RainViewer; 13 frames = the same 2 hours.
+  const IEM_TILES = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/ridge::USCOMP-N0Q-";
+  async function fetchIemRadar() {
+    try {
+      const r = await fetchT("https://mesonet.agron.iastate.edu/data/gis/images/4326/USCOMP/n0q_0.json", 9000);
+      const j = r.ok ? await r.json() : null;
+      const last = j && j.meta && Date.parse(j.meta.valid);
+      if (!last) return false;
+      const frames = [];
+      for (let i = 12; i >= 0; i--) {
+        const d = new Date(last - i * 600000);
+        frames.push({ time: d.getTime() / 1000, path: d.toISOString().replace(/[-T:]/g, "").slice(0, 12) });   // YYYYMMDDHHMM UTC
+      }
+      setRadarFrames("iem", frames);
+      return true;
+    } catch (e) { return false; }
+  }
+  function radarTileUrl(fr, x, y) {
+    return state.rv.host === "iem"
+      ? IEM_TILES + fr.path + "/5/" + x + "/" + y + ".png"   // 256px; drawImage stretches it into the 512 cell
+      : state.rv.host + fr.path + "/" + R_SIZE + "/5/" + x + "/" + y + "/2/1_1.png";
+  }
+  let radarRetry = 0;
   async function fetchRadar() {
     let got = false;
     try {
-      const r = await fetch("https://api.rainviewer.com/public/weather-maps.json");
+      const r = await fetchT("https://api.rainviewer.com/public/weather-maps.json", 9000);
       const j = r.ok ? await r.json() : null;
-      if (j && j.radar && j.radar.past && j.radar.past.length) {
-        state.rv = { host: j.host, frames: j.radar.past.slice(-19) };   // up to ~3 hours of frames
-        stashRv();
-        const live = new Set(state.rv.frames.map(f => f.path));
-        radarFrames.forEach((v, k) => { if (!live.has(k)) radarFrames.delete(k); });   // expired frames let go of their tiles
-        updateSat();
-        prefetchRadarFrames();   // warm the whole scrub history: 4 small tiles per frame
-        got = true;
-      }
+      if (j && j.radar && j.radar.past && j.radar.past.length) { setRadarFrames(j.host, j.radar.past.slice(-19)); got = true; }
     } catch (e) {}
+    // RainViewer unreachable and what's on screen is old (or nothing): switch to the NOAA backup.
+    // (Fresh RainViewer frames stay put through a blip rather than flipping color schemes.)
+    const fr = state.rv && state.rv.frames;
+    if (!got && (!fr || Date.now() / 1000 - fr[fr.length - 1].time > 1500)) got = await fetchIemRadar();
     if (!got && !state.rv) {
-      const s = unstashRv();   // nothing came back: replay the last picture from the tile cache
+      const s = unstashRv();   // nothing came back at all (offline?): replay the last picture from the tile cache
       if (s) { state.rv = s; updateSat(); prefetchRadarFrames(); got = true; }
     }
     // No frames at all, no stash: say so instead of "Radar loading" forever.
     // (With old frames still up, silence is kinder — the 5-min refresh will catch up.)
     if (!got && !state.rv) {
       const t = el("sat-time");
-      if (t) t.textContent = "The radar is out of reach — tap the map to try again";
+      if (t) t.textContent = "The radar is out of reach — trying again…";
     }
+    // and keep trying on its own while she's looking, instead of waiting for a tap
+    clearTimeout(radarRetry);
+    if (!got && radarOpen()) radarRetry = setTimeout(() => { if (radarOpen()) fetchRadar(); }, 20000);
   }
   async function geocode(q) {
     try {
@@ -1946,7 +2015,7 @@
       (function load(attempt) {   // same retry-with-backoff as the radar tiles — no permanent holes in the map
         const im = new Image();
         im.onload = () => { if (gen === baseGen) bctx.drawImage(im, dx, dy, 256, 256); };
-        im.onerror = () => { if (attempt < 3 && gen === baseGen) setTimeout(() => load(attempt + 1), 900 * attempt); };
+        im.onerror = () => { if (attempt < 7 && gen === baseGen) setTimeout(() => load(attempt + 1), Math.min(20000, 1000 * Math.pow(2, attempt - 1))); };
         im.src = url;
       })(1);
     }
@@ -1997,8 +2066,10 @@
     view.__resetZoom = () => setZoom(1);
   }
   // Start (or reuse) the 4-tile download for one frame. When the LAST tile lands, the frame
-  // paints — atomically — if it's still the one being shown. A failed tile retries twice,
-  // then the frame is marked failed (shown as no radar, never a partial patchwork).
+  // paints — atomically — if it's still the one being shown. A failed tile keeps retrying with
+  // backoff (1s, 2s, 4s… up to 20s) for as long as the sheet is open: RainViewer's rate limit
+  // is per IP per minute, and a phone on a shared carrier IP can sit in a 429 for most of one.
+  // Closing the sheet parks the frame as failed; the next open starts it fresh.
   function radarFrameEntry(fr) {
     let e = radarFrames.get(fr.path);
     if (e && e.failed) { radarFrames.delete(fr.path); e = null; }   // a failed frame retries next time it's asked for
@@ -2006,18 +2077,21 @@
     e = { imgs: [null, null, null, null], left: 4, ready: false, failed: false, map: radarMap };
     radarFrames.set(fr.path, e);
     R_OFF.forEach((d, i) => {
-      const url = state.rv.host + fr.path + "/" + R_SIZE + "/5/" + (radarMap.x5 + d[0]) + "/" + (radarMap.y5 + d[1]) + "/2/1_1.png";
+      const url = radarTileUrl(fr, radarMap.x5 + d[0], radarMap.y5 + d[1]);
       (function load(attempt) {
+        if (radarFrames.get(fr.path) !== e) return;              // frame expired or map rebuilt: let it go
+        if (attempt > 1 && !radarOpen()) { e.failed = true; return; }
         const im = new Image();
         im.onload = () => {
+          if (e.imgs[i]) return;
           e.imgs[i] = im; e.left--;
           if (!e.left) {
             e.ready = true;
-            // updateSat paints the completed frame AND drops the "loading" note from the time label
-            if (radarCtx && radarCtx.__frame === fr.path && e.map === radarMap) updateSat();
+            // repaint if she's waiting on this frame, or a stand-in frame is showing in its place
+            if (radarCtx && e.map === radarMap && (radarCtx.__frame === fr.path || radarCtx.__shown !== radarCtx.__frame)) updateSat();
           }
         };
-        im.onerror = () => { if (attempt < 3) setTimeout(() => load(attempt + 1), 900 * attempt); else e.failed = true; };
+        im.onerror = () => setTimeout(() => load(attempt + 1), Math.min(20000, 1000 * Math.pow(2, attempt - 1)));
         im.src = url;
       })(1);
     });
@@ -2034,8 +2108,8 @@
   function prefetchRadarFrames() {
     const frames = state.rv && state.rv.frames || [];
     frames.slice().reverse().forEach((fr, i) => setTimeout(() => {
-      const rs = el("sheet-radar");   // close the sheet, stop the downloads — tiles load only while open
-      if (state.rv && radarMap && rs && rs.classList.contains("open")) radarFrameEntry(fr);
+      // close the sheet, stop the downloads — tiles load only while open
+      if (state.rv && radarMap && radarOpen() && state.rv.frames.indexOf(fr) >= 0) radarFrameEntry(fr);
     }, 400 * i));
   }
   function updateSat() {
@@ -2047,14 +2121,24 @@
     el("sat-scrub").min = -(Math.max(1, frames.length) - 1);
     const idx = frames.length ? clamp(frames.length - 1 + (+el("sat-scrub").value), 0, frames.length - 1) : -1;
     const fr = idx >= 0 ? frames[idx] : null;
-    // One frame, one paint: a ready frame draws whole right now; a still-loading frame
-    // shows as blank radar and paints atomically the moment its 4th tile lands (the
-    // __frame check in radarFrameEntry). Partial patchwork cannot happen.
-    let entry = null;
+    // One frame, one paint: a ready frame draws whole right now. While it loads, the nearest
+    // COMPLETE frame stands in (labelled with its own time below) — the map never blanks out
+    // into what reads as clear skies — and the asked-for frame swaps in atomically the moment
+    // its 4th tile lands. Partial patchwork still cannot happen.
+    let entry = null, shownFr = null;
     if (radarCtx) {
       radarCtx.__frame = fr ? fr.path : null;
       entry = fr ? radarFrameEntry(fr) : null;
-      drawRadarFrame(entry && entry.ready ? entry : null);
+      let shown = entry && entry.ready ? entry : null;
+      if (shown) shownFr = fr;
+      for (let d = 1; fr && !shown && d < frames.length; d++) {
+        for (const j of [idx - d, idx + d]) {
+          const e2 = frames[j] && radarFrames.get(frames[j].path);
+          if (e2 && e2.ready && e2.map === radarMap) { shown = e2; shownFr = frames[j]; break; }
+        }
+      }
+      drawRadarFrame(shown);
+      radarCtx.__shown = shownFr ? shownFr.path : null;
     }
     // inline, not via a stylesheet selector — the canvas no longer lives inside the grid
     if (radarCtx) radarCtx.canvas.style.opacity = el("radar-toggle").textContent.indexOf("off") >= 0 ? "0" : "0.78";
@@ -2063,10 +2147,12 @@
       pin.style.left = ((m.xf - radarMap.x0) / radarMap.span * 100) + "%";
       pin.style.top = ((m.yf - radarMap.y0) / radarMap.span * 100) + "%";
     }
-    el("sat-time").textContent = fr
-      ? fmtLocalTime(fr.time) + " \u00b7 " + Math.max(0, Math.round((Date.now() / 1000 - fr.time) / 60)) + " min ago"
-        + (entry && !entry.ready ? " \u00b7 loading" : "")   // blank canvas \u2260 clear skies \u2014 say which it is
-      : "Radar loading";
+    // the label always names the moment actually painted, and what's still on its way
+    const ago = f => fmtLocalTime(f.time) + " \u00b7 " + Math.max(0, Math.round((Date.now() / 1000 - f.time) / 60)) + " min ago";
+    el("sat-time").textContent = !fr ? "Radar loading"
+      : (shownFr ? ago(shownFr) : ago(fr))
+        + (shownFr === fr ? "" : shownFr ? " \u00b7 loading " + fmtLocalTime(fr.time) : " \u00b7 loading")
+        + (state.rv.host === "iem" ? " \u00b7 NOAA" : "");
   }
   // Scroll the map so her pin sits mid-view — and KEEP it there through WebKit's
   // post-open scroll wipes. For a while after a sheet opens, WebKit asynchronously
@@ -2095,6 +2181,160 @@
     const h = +t.slice(11, 13);
     return (h % 12 || 12) + " " + (h >= 12 ? "PM" : "AM");
   }
+  // ---------- weather icons: one drawn set on a 24-unit grid, one stroke weight (cloud, sun,
+  // moon and rain shapes after Feather, MIT). Emoji drew differently on every phone. ----------
+  const WI_SUN = "<g class='wi-sun'><circle cx='12' cy='12' r='4.4'/><path d='M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.35 5.35l1.55 1.55M17.1 17.1l1.55 1.55M5.35 18.65l1.55-1.55M17.1 6.9l1.55-1.55'/></g>";
+  const WI_MOON = "<path class='wi-moon' d='M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z'/>";
+  const WI_CLOUD = "M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z";
+  const WI_CLOUD_UP = "M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25z";   // raised: room for rain, snow, a bolt
+  function wxIcon(code, night, size, x, y) {
+    const cloud = (d, t) => "<path class='wi-cloud' d='" + d + "'" + (t ? " transform='" + t + "'" : "") + "/>";
+    const orb = night ? WI_MOON : WI_SUN;
+    let b;
+    if (code === 0) b = orb;
+    else if (code <= 2) b = "<g transform='translate(.5 .5) scale(.6)'>" + orb + "</g>" + cloud(WI_CLOUD, "translate(4.6 4.4) scale(.82)");
+    else if (code === 3) b = cloud(WI_CLOUD);
+    else if (code === 45 || code === 48) b = "<path class='wi-fog' d='M3 8h18M6 12h15M3 16h15M7 20h11'/>";
+    else if (code >= 51 && code <= 57) b = cloud(WI_CLOUD_UP) + "<path class='wi-drop' d='M8 19v1.6M12 21v1.6M16 19v1.6'/>";
+    else if (code >= 71 && code <= 77 || code === 85 || code === 86) b = cloud(WI_CLOUD_UP) + "<path class='wi-snow' d='M8 18.5h.01M8 22h.01M12 20.2h.01M16 18.5h.01M16 22h.01'/>";
+    else if (code >= 95) b = cloud(WI_CLOUD_UP) + "<path class='wi-bolt' d='M13 12l-3.5 5h5L11 22.5'/>";
+    else b = cloud(WI_CLOUD_UP) + "<path class='wi-drop' d='M8 17.5v3.5M12 19.5v3.5M16 17.5v3.5'/>";   // rain, showers
+    return "<svg class='wi' viewBox='0 0 24 24' width='" + size + "' height='" + size + "'" +
+      (x != null ? " x='" + x.toFixed(1) + "' y='" + y.toFixed(1) + "'" : "") + " aria-hidden='true' focusable='false'>" + b + "</svg>";
+  }
+
+  // ---------- the temperature week: one page per day, swiped sideways like Google's ----------
+  let wkIdx = 0;   // the day she's looking at (0 = today); survives the 5-minute refresh
+  const longDate = (iso, wd) => new Date(iso + "T12:00:00Z").toLocaleDateString("en-US", wd ? { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" } : { month: "long", day: "numeric", timeZone: "UTC" });
+  const wkName = (d, i) => i === 0 ? "Today" : i === 1 ? "Tomorrow" : longDate(d.iso, true).split(",")[0];
+  function weekDays(wk) {
+    // "now" by that place's own clock, so a week cached yesterday still opens on today
+    let now = wk.off != null ? wk.t.indexOf(new Date(Date.now() + wk.off * 1000).toISOString().slice(0, 13) + ":00") : -1;
+    if (now < 0) now = wk.now || 0;
+    const days = [];
+    for (let a = now - (+wk.t[now].slice(11, 13)); a + 23 < wk.t.length; a += 24) {
+      let hi = -Infinity, lo = Infinity, pop = 0, code = 0;
+      for (let k = a; k < a + 24; k++) { hi = Math.max(hi, wk.tp[k]); lo = Math.min(lo, wk.tp[k]); pop = Math.max(pop, wk.pp[k] || 0); }
+      for (let k = a + 7; k <= a + 19; k++) code = Math.max(code, wk.code[k]);   // the day's sky: the worst of its daylight
+      days.push({ a: a, di: Math.floor(a / 24), hi: hi, lo: lo, pop: pop, code: code, iso: wk.t[a].slice(0, 10), nowH: days.length ? -1 : now - a });
+    }
+    return days;
+  }
+  function wkNight(wk, day, h) {
+    const sr = wk.sr && wk.sr[day.di] != null ? wk.sr[day.di] : state.sun.sunrise;
+    const ss = wk.ss && wk.ss[day.di] != null ? wk.ss[day.di] : state.sun.sunset;
+    return h * 60 < sr - 30 || h * 60 > ss;
+  }
+  // One day's chart: 8 labelled columns (every 3 hours) over a curve through all 24 hours.
+  // The scale is the WEEK's, so a cold day sits visibly lower as she swipes, and the line runs
+  // a couple of hours past midnight both ways so it flows on unbroken from page to page.
+  function dayChart(wk, day, W, lo, span) {
+    const TOP = 38, GH = 84, base = TOP + GH + 10, HT = base + 76, CW = W / 8;
+    const X = h => CW / 2 + h * CW / 3, Y = v => TOP + GH * (1 - (v - lo) / span);
+    const f = n => n.toFixed(1);
+    const P = [];
+    for (let k = Math.max(0, day.a - 2); k < Math.min(wk.t.length, day.a + 27); k++) P.push([X(k - day.a), Y(wk.tp[k]), k - day.a]);
+    const seg = i => {                                          // Catmull-Rom between P[i] and P[i+1], as a cubic Bezier
+      const p0 = P[i - 1] || P[i], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2] || p2;
+      return " C" + f(p1[0] + (p2[0] - p0[0]) / 6) + " " + f(p1[1] + (p2[1] - p0[1]) / 6) + " " + f(p2[0] - (p3[0] - p1[0]) / 6) + " " + f(p2[1] - (p3[1] - p1[1]) / 6) + " " + f(p2[0]) + " " + f(p2[1]);
+    };
+    const path = (i0, i1) => { let d = "M" + f(P[i0][0]) + " " + f(P[i0][1]); for (let i = i0; i < i1; i++) d += seg(i); return d; };
+    const area = (i0, i1) => path(i0, i1) + " L" + f(P[i1][0]) + " " + base + " L" + f(P[i0][0]) + " " + base + "Z";
+    const last = P.length - 1, cut = day.nowH >= 0 ? Math.max(0, P.findIndex(p => p[2] === day.nowH)) : 0;   // today: hours gone by go quiet
+    let s = "<svg class='tchart' viewBox='0 0 " + f(W) + " " + HT + "' width='100%' height='" + HT + "' aria-hidden='true' focusable='false'>" +
+      "<defs><linearGradient id='tfill-" + day.di + "' gradientUnits='userSpaceOnUse' x1='0' y1='" + TOP + "' x2='0' y2='" + base + "'><stop offset='0' class='tf0'/><stop offset='1' class='tf1'/></linearGradient></defs>";
+    if (cut > 0) s += "<path class='tarea past' d='" + area(0, cut) + "'/><path class='tline past' d='" + path(0, cut) + "'/>";
+    s += "<path class='tarea' d='" + area(cut, last) + "' fill='url(#tfill-" + day.di + ")'/><path class='tline' d='" + path(cut, last) + "'/>";
+    for (let h = 0; h < 24; h += 3) {
+      const k = day.a + h, x = X(h), past = h + 2 < day.nowH;
+      let pop = 0, code = 0;
+      for (let q = k; q < k + 3; q++) { pop = Math.max(pop, wk.pp[q] || 0); code = Math.max(code, wk.code[q]); }   // the worst of its 3 hours
+      s += "<text class='tnum" + (past ? " past" : "") + "' x='" + f(x) + "' y='" + f(Y(wk.tp[k]) - 11) + "'>" + Math.round(wk.tp[k]) + "&deg;</text>" +
+        "<text class='thr" + (past ? " past" : "") + "' x='" + f(x) + "' y='" + (base + 22) + "'>" + (h % 12 || 12) + "<tspan class='tap' dx='1.5'>" + (h < 12 ? "AM" : "PM") + "</tspan></text>" +
+        wxIcon(code, wkNight(wk, day, h + 1), 24, x - 12, base + 31) +
+        (pop >= 20 ? "<text class='tpop' x='" + f(x) + "' y='" + (base + 72) + "'>" + pop + "%</text>" : "");
+    }
+    if (day.nowH >= 0) {                                        // where she is in the day
+      const nx = Math.min(X(day.nowH), W - 14), ny = Y(wk.tp[day.a + day.nowH]);
+      s += "<line class='tnow' x1='" + f(nx) + "' y1='16' x2='" + f(nx) + "' y2='" + base + "'/>" +
+        "<text class='tnowlab' x='" + f(Math.max(nx, 16)) + "' y='11'>Now</text>" +
+        "<circle class='tdot' cx='" + f(nx) + "' cy='" + f(ny) + "' r='5.5'/>";
+    }
+    return s + "</svg>";
+  }
+  function renderWeek(wk) {
+    const days = weekDays(wk);
+    if (!days.length) return "<p class='empty-note'>Gathering the week's hours…</p>";
+    wkIdx = clamp(wkIdx, 0, days.length - 1);
+    let lo = Infinity, hi = -Infinity;
+    for (const d of days) { lo = Math.min(lo, d.lo); hi = Math.max(hi, d.hi); }
+    const span = Math.max(hi - lo, 14);
+    lo -= (span - (hi - lo)) / 2;                               // a calm week stays a gentle line, centered
+    const sh = el("sheet-hours"), cs = getComputedStyle(sh);
+    const W = Math.max(260, sh.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight));
+    // layout-critical styles are inline (see CLAUDE.md): a stale cached stylesheet must not stack the pages
+    let pages = "", strip = "";
+    days.forEach((d, i) => {
+      const name = wkName(d, i);
+      pages += "<section class='wk-page' id='wk-page-" + i + "' role='tabpanel' aria-labelledby='wk-tab-" + i + "' style='flex:0 0 100%;width:100%;scroll-snap-align:start;scroll-snap-stop:always'>" + dayChart(wk, d, W, lo, span) + "</section>";
+      strip += "<button class='wk-tab' role='tab' id='wk-tab-" + i + "' aria-controls='wk-page-" + i + "' aria-label='" + name + ", high " + Math.round(d.hi) + ", low " + Math.round(d.lo) + "' data-i='" + i + "' style='flex:1 1 0;min-width:0'>" +
+        "<span class='wk-tday'>" + (i === 0 ? "Today" : longDate(d.iso, true).slice(0, 3)) + "</span>" + wxIcon(d.code, false, 26) +
+        "<span class='wk-thi'>" + Math.round(d.hi) + "&deg;</span><span class='wk-tlo'>" + Math.round(d.lo) + "&deg;</span></button>";
+    });
+    const chev = d => "<svg width='18' height='18' viewBox='0 0 16 16' fill='none' aria-hidden='true'><path d='" + d + "' stroke='currentColor' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/></svg>";
+    return "<div class='wk-head'><h3 id='wk-day' aria-live='polite'></h3>" +
+        "<div class='wk-nav'><button class='icon-btn wk-arrow' id='wk-prev' aria-label='Previous day'>" + chev("M10 3.5 5.5 8l4.5 4.5") + "</button>" +
+        "<button class='icon-btn wk-arrow' id='wk-next' aria-label='Next day'>" + chev("M6 3.5 10.5 8 6 12.5") + "</button></div><p id='wk-sub'></p></div>" +
+      "<p class='wk-stats' id='wk-stats'></p>" +
+      "<div class='wk-pages' id='wk-pages' style='display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch'>" + pages + "</div>" +
+      "<div class='wk-strip' id='wk-strip' role='tablist' aria-label='Choose a day' style='display:flex;gap:4px'>" + strip + "</div>";
+  }
+  function wireWeek(wk) {
+    const pages = el("wk-pages"); if (!pages) return;
+    const days = weekDays(wk), tabs = [...document.querySelectorAll("#wk-strip .wk-tab")];
+    function show(i, dir) {
+      const d = days[i], feels = d.nowH >= 0 && wk.at ? wk.at[d.a + d.nowH] : null;
+      wkIdx = i;
+      el("wk-day").textContent = wkName(d, i);
+      el("wk-sub").textContent = (i < 2 ? longDate(d.iso, true) : longDate(d.iso, false)) + " · " +
+        (feels != null ? "Feels like " + Math.round(feels) + "° now" : wxLabel(d.code)[0]);
+      el("wk-stats").innerHTML = "<span>High <b>" + Math.round(d.hi) + "&deg;</b></span><span>Low <b>" + Math.round(d.lo) + "&deg;</b></span>" +
+        "<span>Rain <b>" + (d.pop >= 5 ? d.pop + "%" : "None") + "</b></span>";
+      tabs.forEach((t, j) => { t.setAttribute("aria-selected", j === i ? "true" : "false"); t.tabIndex = j === i ? 0 : -1; });
+      el("wk-prev").disabled = i === 0;
+      el("wk-next").disabled = i === days.length - 1;
+      if (dir && !prefersReduced) {                             // the heading slides in from the side she swiped toward
+        for (const t of [el("wk-day"), el("wk-sub")]) if (t.animate) t.animate([{ opacity: 0, transform: "translateX(" + (dir * 14) + "px)" }, { opacity: 1, transform: "none" }], { duration: 220, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
+      }
+    }
+    let target = -1, raf = 0, release = 0;
+    function go(i) {
+      i = clamp(i, 0, days.length - 1);
+      if (i === wkIdx) return;
+      const dir = i > wkIdx ? 1 : -1;
+      target = i; clearTimeout(release); release = setTimeout(() => { target = -1; }, 900);
+      pages.scrollTo({ left: i * pages.clientWidth, behavior: prefersReduced ? "auto" : "smooth" });
+      show(i, dir);
+    }
+    pages.addEventListener("scroll", () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const i = clamp(Math.round(pages.scrollLeft / (pages.clientWidth || 1)), 0, days.length - 1);
+        if (target >= 0) { if (i === target) target = -1; return; }   // a tap's smooth glide: don't flicker through the days between
+        if (i !== wkIdx) show(i, i > wkIdx ? 1 : -1);
+      });
+    }, { passive: true });
+    tabs.forEach(t => { t.onclick = () => go(+t.dataset.i); });
+    el("wk-strip").onkeydown = e => {
+      const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (d) { e.preventDefault(); go(wkIdx + d); tabs[wkIdx].focus(); }
+    };
+    el("wk-prev").onclick = () => go(wkIdx - 1);
+    el("wk-next").onclick = () => go(wkIdx + 1);
+    pages.scrollLeft = wkIdx * pages.clientWidth;               // a refresh keeps her on the day she was reading
+    show(wkIdx, 0);
+  }
   let hoursView = 0;   // 0 = her town, 1 = the second place
   function renderHours() {
     if (hoursView === 1 && !state.loc2) hoursView = 0;
@@ -2105,27 +2345,26 @@
     const l2row = el("loc2-row");
     if (l2row) l2row.style.display = hoursView === 1 || (!state.loc2 && hoursView === 0) ? (hoursView === 1 ? "" : "none") : "none";
     if (!h || !h.t.length) {
-      if (hoursView === 1) el("hours-temp").innerHTML = el("hours-rain").innerHTML = el("hours-wind").innerHTML = "<p class='empty-note'>Fetching the sky over " + state.loc2.place.split(",")[0] + "...</p>";
+      el("hours-temp").innerHTML = el("hours-rain").innerHTML = el("hours-wind").innerHTML = "<p class='empty-note'>Fetching the sky over " + (hoursView === 1 ? state.loc2 : state.loc).place.split(",")[0] + "...</p>";
       return;
     }
     const rainEl = el("hours-rain"), windEl = el("hours-wind"), tempEl = el("hours-temp"), cloudEl = el("hours-cloud");
-    let rh = "", wh = "", th = "", ch = "";
+    let rh = "", wh = "", ch = "";
     const n = Math.min(12, h.t.length);
-    let tMin = 999, tMax = -999;
-    for (let i = 0; i < n; i++) { if (h.tp[i] < tMin) tMin = h.tp[i]; if (h.tp[i] > tMax) tMax = h.tp[i]; }
-    if (tMax - tMin < 6) { tMax += 3; tMin -= 3; }
     for (let i = 0; i < n; i++) {
       rh += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar'><i style='width:" + clamp(h.pp[i], 2, 100) + "%'></i></span><span class='hval'>" + h.pp[i] + "% <small>" + (+h.pr[i]).toFixed(2) + " in</small></span></div>";
       wh += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar wind'><i style='width:" + clamp(h.ws[i] / 32 * 100, 3, 100) + "%'></i></span><span class='hval'><span class='harrow' style='transform:rotate(" + ((h.wd[i] + 180) % 360) + "deg)'>&#8593;</span> " + Math.round(h.ws[i]) + " <small>g " + Math.round(h.wg[i]) + " mph</small></span></div>";
-      const fl = h.at && h.at[i] != null ? Math.round(h.at[i]) : null;
-      th += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar temp'><i style='width:" + clamp((h.tp[i] - tMin) / (tMax - tMin) * 100, 4, 100) + "%'></i></span><span class='hval'>" + Math.round(h.tp[i]) + "&deg; air" + (fl != null ? " <small>feels " + fl + "&deg;</small>" : "") + "</span></div>";
     }
+    const place = hoursView === 1 ? state.loc2.place : state.loc.place;
+    el("hours-google").href = "https://www.google.com/search?q=" + encodeURIComponent("hourly weather " + place);
     for (let i = 0; i < Math.min(8, h.t.length); i++) {
       ch += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar cloud'><i style='width:" + clamp(h.cc[i], 2, 100) + "%'></i></span><span class='hval'>" + h.cc[i] + "% <small>" + Math.round(h.tp[i]) + "&deg;</small></span></div>";
     }
     rainEl.innerHTML = rh;
     windEl.innerHTML = wh;
-    if (tempEl) tempEl.innerHTML = th;
+    const wk = hoursView === 1 ? state.week2 : state.week;
+    tempEl.innerHTML = wk ? renderWeek(wk) : "<p class='empty-note'>Gathering the week's hours…</p>";
+    if (wk) wireWeek(wk);
     cloudEl.innerHTML = ch;
     updateHoursBar();
   }
@@ -2191,7 +2430,7 @@
         "<div class='day'>" +
           "<button class='day-row' aria-expanded='false' aria-controls='dd-" + i + "'>" +
             "<span class='day-name'><b>" + dayName(d.time[i], i) + "</b><small>" + shortDate(d.time[i]) + "</small></span>" +
-            "<span class='day-glyph' title='" + w[0] + "'>" + w[1] + "</span>" +
+            "<span class='day-glyph' title='" + w[0] + "'>" + wxIcon(d.code[i], false, 30) + "</span>" +
             "<span class='day-pop'>" + popCell + "</span>" +
             "<span class='day-range'><i class='lo'>" + Math.round(d.tmin[i]) + "&deg;</i>" +
               "<span class='track'><span class='fill' style='left:" + l.toFixed(1) + "%;width:" + width.toFixed(1) + "%;background-size:" + bgSize + "% 100%;background-position:" + bgPos + "% 0'></span></span>" +
@@ -2353,9 +2592,9 @@
   const TOUR = [
     { sel: null, title: "Her Secret Garden", body: "Everything here is alive — the sky, the light, and the weather all follow the real sky over the town at the top. Here is a quick walk through it." },
     { sel: "#loc-chip", title: "Where she is", body: "Tap the town name to move the whole garden anywhere. Everything refreshes to that place's real sky." },
-    { sel: "#temp-link", title: "Today's sky", body: "The live temperature and conditions right now. Tap it to open the forecast on Google." },
+    { sel: "#temp-link", title: "Today's sky", body: "The live temperature and conditions right now. Tap it to see the temperature hour by hour, the way Google shows it." },
     { sel: null, title: "Scripture on the clouds", body: "A verse drifts across the sky on its own white cloud. Tap anywhere in the sky for a new one — or pause and step it with the buttons up there." },
-    { sel: "#open-hours", title: "Hourly sky", body: "The weather book: rain, temperature, and wind hour by hour — for her town and one more place she picks." },
+    { sel: "#open-hours", title: "Hourly sky", body: "The weather book: temperature, rain, and wind hour by hour — for her town and one more place she picks." },
     { sel: "#open-daily", title: "Ten-day forecast", body: "New. The whole week ahead and more. Tap any day for feels-like, wind, UV, sunrise, sunset, and that night's moon." },
     { sel: "#open-radar", title: "Rain radar", body: "A live rain map centered on her town, a little pin where she is. Drag it to look around the region." },
     { sel: "#open-scenes", title: "Gardens & scenes", body: "Five gardens, a Catskill evening, and a maker for her own. While planting, tuck the tray away with its chevron to plant right up at the front." },
@@ -2513,6 +2752,7 @@
   }
 
   function openSheet(which) {
+    if (which === "hours") { wkIdx = 0; renderHours(); }   // every visit starts on today
     el("sheet-" + which).classList.add("open");
     el("sheet-backdrop").classList.add("open");
   }
@@ -2811,7 +3051,7 @@
       d.className = "trip-row";
       const rainy = rw.pp != null && (rw.pp >= 40 || (rw.code >= 51 && rw.code < 80));
       // arrival clock is straight from the real driving time the map service returned
-      d.innerHTML = "<span class='hlab'>" + (rw.min === 0 ? "leave now" : "~" + clockFromNow(rw.min / 60)) + "</span><b>" + rw.name + "</b><span class='hval'>" + (rw.code != null ? wxLabel(rw.code)[1] + " " : "") + (rw.pp != null ? rw.pp + "%" + (rainy ? " rain" : "") : "") + "</span>";
+      d.innerHTML = "<span class='hlab'>" + (rw.min === 0 ? "leave now" : "~" + clockFromNow(rw.min / 60)) + "</span><b>" + rw.name + "</b><span class='hval'>" + (rw.code != null ? wxIcon(rw.code, false, 20) + " " : "") + (rw.pp != null ? rw.pp + "%" + (rainy ? " rain" : "") : "") + "</span>";
       wrap.appendChild(d);
     });
     el("trip-total").textContent = "About " + fmtDur(plan.totalMin / 60) + " of real road time. Each town's sky is its forecast for the hour you actually reach it.";
@@ -3116,6 +3356,12 @@
       persist(); initParticles();
     });
     el("open-hours").onclick = () => { renderHours(); openSheet("hours"); };
+    // her temperature opens the hour-by-hour graph right here, not Google in another app
+    el("temp-link").onclick = e => {
+      e.preventDefault();
+      el("hours-tabs").querySelector("[data-t=temp]").click();
+      hoursView = 0; openSheet("hours");
+    };
     el("open-daily").onclick = () => { renderDaily(); openSheet("daily"); if (!state.daily) fetchDaily(); };
     document.querySelectorAll("#hours-loc button").forEach(b => b.onclick = () => {
       const v = +b.dataset.l;
@@ -3143,6 +3389,7 @@
       el("hours-rain").style.display = b.dataset.t === "rain" ? "" : "none";
       el("hours-wind").style.display = b.dataset.t === "wind" ? "" : "none";
       el("hours-temp").style.display = b.dataset.t === "temp" ? "" : "none";
+      const pg = el("wk-pages"); if (pg) pg.scrollLeft = wkIdx * pg.clientWidth;   // hidden, it couldn't hold its place
     });
     let satThrottle = 0;
     el("sat-scrub").oninput = () => {   // throttle while dragging so we don't flood the tile server

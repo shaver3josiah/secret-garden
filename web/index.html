@@ -30,7 +30,7 @@
     </div>
     <div class="conditions">
       <button class="chip-info live tap" id="loc-chip" aria-label="Change location"><span id="cond-place">Beaver, PA</span></button>
-      <a class="chip-info tap" id="temp-link" target="_blank" rel="noopener" href="https://www.google.com/search?q=weather+Beaver+PA" aria-label="Check this temperature on Google"><span class="glyph" id="cond-wx-glyph">&#9728;&#65039;</span><span id="cond-wx-text">Clear</span></a>
+      <a class="chip-info tap" id="temp-link" target="_blank" rel="noopener" href="https://www.google.com/search?q=weather+Beaver+PA" aria-label="Hour-by-hour temperature"><span class="glyph" id="cond-wx-glyph">&#9728;&#65039;</span><span id="cond-wx-text">Clear</span></a>
       <a class="chip-info tap" id="cond-aqi" target="_blank" rel="noopener" style="display:none" aria-label="Check this air quality on Google"><span id="cond-aqi-text">Air</span></a>
     </div>
   </header>
@@ -164,14 +164,15 @@
   </div>
   <div class="field">
     <div class="seg" id="hours-tabs">
-      <button data-t="rain" class="on">Rain</button>
-      <button data-t="temp">Temp</button>
+      <button data-t="temp" class="on">Temperature</button>
+      <button data-t="rain">Rain</button>
       <button data-t="wind">Wind</button>
     </div>
   </div>
-  <div class="hours-panel" id="hours-rain"></div>
-  <div class="hours-panel" id="hours-temp" style="display:none"></div>
+  <div class="hours-panel" id="hours-temp"></div>
+  <div class="hours-panel" id="hours-rain" style="display:none"></div>
   <div class="hours-panel" id="hours-wind" style="display:none"></div>
+  <a class="daily-google" id="hours-google" target="_blank" rel="noopener">See the hours on Google Weather &#8599;</a>
 </section>
 
 <section class="sheet" id="sheet-daily" role="dialog" aria-label="Ten day forecast">
@@ -210,7 +211,7 @@
     <div class="sat-row"><span id="sat-time">Latest radar</span><button class="chip" id="map-zoom-reset" style="display:none">Reset zoom</button><button class="chip" id="radar-toggle">Rain radar on</button></div>
   </div>
   <div id="hours-cloud"></div>
-  <p class="about credit">Map &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Radar by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>. Drag the map to look around.</p>
+  <p class="about credit">Map &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Radar by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>, with NOAA NEXRAD via <a href="https://mesonet.agron.iastate.edu/" target="_blank" rel="noopener">Iowa State</a> as backup. Drag the map to look around.</p>
 </section>
 
 <section class="sheet" id="sheet-verses" role="dialog" aria-label="Her verses">
