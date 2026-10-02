@@ -563,6 +563,11 @@ p.about.credit a { color: var(--gold-ink); text-decoration: none; }
 .wi .wi-fog { stroke: #85929A; }
 .chip-info .glyph .wi { display: block; }
 
+/* radar full-screen: double-tap the map; the close button brings it back */
+#sheet-radar.full { top: 0; width: 100vw; max-height: none; border-radius: 0; display: flex; flex-direction: column; overflow: hidden; padding-top: calc(14px + var(--safe-t)); }
+#sheet-radar.full .sheet-head { margin-bottom: 12px; }
+#sheet-radar.full .map-view { flex: 1 1 auto; min-height: 0; aspect-ratio: auto; }
+#sheet-radar.full #hours-cloud, #sheet-radar.full .credit { display: none; }
 #sheet-radar .sat-row span { font-size: 1.2rem; }
 #sheet-radar #radar-toggle { font-size: 1.05rem; }
 #sheet-radar .hour-row { grid-template-columns: 74px 1fr auto; gap: 14px; font-size: 1.24rem; }
@@ -903,7 +908,7 @@ button.chip-info:hover { border-color: var(--line-warm); background: rgba(255, 2
   border-radius: 16px;
   border: 1px solid var(--line);
   scrollbar-width: none;
-  touch-action: pan-x pan-y;   /* one finger pans; two-finger pinch is handled in JS for a 5x zoom */
+  touch-action: none;   /* every gesture is handled in JS: pan + glide, pinch to 3x, double-tap full-screen */
 }
 .map-view::-webkit-scrollbar { display: none; }
 .map-wrap {
@@ -1160,12 +1165,25 @@ body.starfield #const-note { color: var(--honey-light); }
 .drawer .radar-open { min-height: 68px; padding: 16px 22px; font-size: 1.35rem; }
 .drawer .radar-open svg { width: 26px; height: 26px; }
 .drawer .hours-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.drawer .hours-bar .hb-chip:nth-child(1) { grid-column: 1; }
-.drawer .hours-bar .hb-chip:nth-child(2) { grid-column: 2; }
-.drawer .hours-bar .hb-chip:nth-child(3) { grid-column: 1; }
-.drawer .hours-bar .hb-open { grid-column: 2; }
-.drawer .hours-bar .daily-open { grid-column: 1; }
-.drawer .hours-bar .radar-open:last-child { grid-column: 2; }
+/* Hourly sky and Radar always share the first row, side by side; any extras switched on in
+   More settings (chips, 10-day) flow two-up beneath them, and a lone one spans the row */
+.drawer .hours-bar .hb-open { grid-column: 1; order: -1; }
+.drawer .hours-bar .radar-open:last-child { grid-column: 2; order: -1; }
+.drawer .hours-bar[data-chips="0"] .daily-open { grid-column: 1 / -1; }
+.drawer .hours-bar[data-chips="1"][data-daily="0"] .hb-chip:nth-child(3) { grid-column: 1 / -1; }
+/* two even halves that never overflow: content-sized columns pushed the right one off-screen */
+.drawer .hours-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.drawer .hours-bar > * { min-width: 0; justify-content: center; white-space: nowrap; }
+.drawer .hb-open.gold { padding: 16px 12px; font-size: 1.3rem; gap: 8px; }
+.drawer .hb-open.gold svg { width: 24px; height: 24px; }
+.drawer .radar-open, .drawer .hb-chip { padding-left: 12px; padding-right: 12px; }
+@media (max-width: 380px) {
+  .drawer .hb-open.gold, .drawer .radar-open, .drawer .hb-chip { font-size: 1.12rem; }
+  .drawer .hb-open.gold svg, .drawer .radar-open svg { width: 21px; height: 21px; }
+}
+@media (max-width: 340px) {
+  .drawer .hb-open.gold, .drawer .radar-open, .drawer .hb-chip { font-size: 1rem; padding-left: 8px; padding-right: 8px; gap: 6px; }
+}
 .drawer .hb-chip, .drawer .hb-open.gold, .drawer .hb-open:not(.gold), .drawer .radar-open { justify-content: center; width: 100%; }
 .daily-open { color: var(--gold-ink); }
 

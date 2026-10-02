@@ -3,6 +3,16 @@
 
   const cv = document.getElementById("scene");
   const ctx = cv.getContext("2d");
+  // the scene canvas and the verse layer pinch-zoom together inside one wrapper
+  const zoomEl = document.createElement("div");
+  zoomEl.style.cssText = "position:fixed;left:0;top:0;right:0;bottom:0;z-index:0;overflow:hidden;";
+  cv.parentNode.insertBefore(zoomEl, cv);
+  zoomEl.appendChild(cv);
+  const vl = document.createElement("canvas");
+  vl.setAttribute("aria-hidden", "true");
+  vl.style.cssText = "position:absolute;left:0;top:0;pointer-events:none;will-change:transform,opacity;opacity:0;";
+  zoomEl.appendChild(vl);
+  const vctx = vl.getContext("2d");
   let W = 0, H = 0, U = 0, DPR = 1, horizonY = 0, T = 0, lastTs = 0;
   let FK = 1;   // this frame's length in old 50ms idle frames: per-frame motion scales by it
 
@@ -31,7 +41,7 @@
     custom: store.custom || [],
     customVerses: store.customVerses || [],
     sail: Object.assign({ on: false, stops: [], speed: 5 }, store.sail || {}),
-    settings: Object.assign({ autoRotate: true, motion: true, skyMode: "real", backdrop: "hills", tourSeen: false }, store.settings || {}),
+    settings: Object.assign({ autoRotate: true, motion: true, skyMode: "real", backdrop: "hills", tourSeen: false, extras: { daily: false, chips: false, aqi: false } }, store.settings || {}),
     weather: store.weather || { code: 0, temp: null, cloud: 22, wind: 6, windDir: 240, isDay: 1, precip: 0 },
     hourly: store.hourly || null,
     daily: store.daily || null,
@@ -355,7 +365,47 @@
   function clearArtCaches() { SPRITES.clear(); spriteBytes = 0; GRADS.clear(); floraHaze = null; }
   let floraHaze = null;
 
-  let rain = [], snow = [], petals = [], pollen = [], flies = [], clouds = [];
+  let rain = [], snow = [], petals = [], pollen = [], flies = [], clouds = [], leaves = [], splashes = [];
+  // ---------- weather states: what the sky is really doing, shown as motion ----------
+  // cloud cover   → clear / few / scattered / broken / overcast: how many clouds, how big, how
+  //                 gray, and above ~75% a slow gray deck that veils the sun
+  // precipitation → drizzle, rain (light → heavy), thunderstorm, sleet, snow (light → heavy)
+  // wind          → calm / breeze / windy / gale: sway, real gusts, a downwind lean, cloud speed,
+  //                 rain slant, blown leaves — all in the wind's actual direction
+  let WX = null;
+  function wxState() {
+    const w = state.weather, c = w.code, calm = state.settings.skyMode === "cycle";   // day cycle: nice weather, always
+    let kind = "none", inten = 0;
+    if (!calm) {
+      if (c >= 95) { kind = "storm"; inten = c >= 96 ? 1 : 0.85; }
+      else if (c >= 71 && c <= 77 || c === 85 || c === 86) { kind = "snow"; inten = c === 75 || c === 86 ? 1 : c === 73 ? 0.65 : c === 77 ? 0.3 : 0.4; }
+      else if (c === 56 || c === 57 || c === 66 || c === 67) { kind = "sleet"; inten = c === 57 || c === 67 ? 0.8 : 0.5; }
+      else if (c >= 51 && c <= 55) { kind = "drizzle"; inten = c === 55 ? 0.65 : c === 53 ? 0.45 : 0.28; }
+      else if (c >= 61 && c <= 65 || c >= 80 && c <= 82) { kind = "rain"; inten = c === 65 || c === 82 ? 1 : c === 63 || c === 81 ? 0.65 : 0.38; }
+      // the measured amount (last 15 min) can only raise it: 0.1 in in 15 minutes is a downpour
+      if (kind !== "none" && w.precip > 0) inten = clamp(Math.max(inten, w.precip / 0.1), 0, 1);
+    }
+    const mph = calm ? Math.min(w.wind || 0, 6) : (w.wind || 0);
+    const gust = state.hourly && state.hourly.wg && state.hourly.wg[0] != null ? state.hourly.wg[0] : mph * 1.3;
+    const ex = -Math.sin((w.windDir || 0) * Math.PI / 180);   // wind blows FROM windDir: a west wind pushes everything right
+    return {
+      cover: (calm ? Math.min(w.cloud, 30) : w.cloud) / 100, kind: kind, inten: inten, mph: mph,
+      gustR: clamp((gust - mph) / Math.max(mph, 4), 0, 1.2),  // how much the gusts out-blow the steady wind
+      ex: ex, cdir: ex < 0 ? -1 : 1,                          // clouds always drift; due-north winds still pick a side
+      sway: clamp(0.1 + mph * 0.06, 0.1, 1.8),                // calm 0.1 → breeze ~0.5 → windy 1.2 → gale 1.8
+      lean: ex * smooth((mph - 6) / 24) * 0.55,               // plants bow downwind from ~6 mph, hard by 30
+      gloom: kind === "none" ? 0 : inten * (kind === "storm" ? 0.5 : kind === "drizzle" ? 0.15 : 0.3)
+    };
+  }
+  function wx() { return WX || (WX = wxState()); }
+  // gusts: a slow, uneven surge (cubed product of two slow sines) — mostly steady, now and then a push
+  function gustAt(t) {
+    const n = 0.5 + 0.5 * Math.sin(t * 0.00031) * Math.sin(t * 0.00113 + 1.7);
+    return 1 + wx().gustR * n * n * n * 1.6;
+  }
+  function windAmp() { return motionOn() ? wx().sway * gustAt(T) : 0; }
+  function windLean() { return motionOn() ? wx().lean * gustAt(T) : wx().lean * 0.6; }
+
   function wxKind() {
     const c = state.weather.code;
     if (c >= 71 && c <= 77 || c === 85 || c === 86) return "snow";
@@ -363,23 +413,58 @@
     if (c === 45 || c === 48) return "fog";
     return "clear";
   }
+  const LEAF_COLS = ["#7A9E6E", "#9DBE92", "#5B8C5A", "#B4894D", "#C9A15E"];
+  function newLeaf(x) {
+    const X = wx();
+    return { x: x, y: horizonY * 0.45 + Math.random() * (H - horizonY * 0.45) * 0.85, vx: (2 + X.mph * 0.25) * (0.7 + Math.random() * 0.6),
+      ph: Math.random() * 6.28, rot: Math.random() * 6.28, spin: (Math.random() - 0.5) * 0.4, s: 3 + Math.random() * 3,
+      col: LEAF_COLS[Math.floor(Math.random() * LEAF_COLS.length)] };
+  }
   function initParticles() {
-    const calm = state.settings.skyMode === "cycle";   // day cycle: nice weather, always
-    const scale = clamp(W / 1100, 0.4, 1.2), k = calm ? "clear" : wxKind(), th = activeTheme();
+    WX = wxState();
+    const X = WX, calm = state.settings.skyMode === "cycle";
+    const scale = clamp(W / 1100, 0.4, 1.2), th = activeTheme();
     const heavy = (motionOn() ? 1 : 0.25) * (perfTier ? 0.55 : 1);
-    rain = []; snow = []; petals = []; pollen = []; flies = []; clouds = [];
-    const cloudN = state.weather.cloud <= 0 ? 0 : clamp(Math.round(2 + state.weather.cloud / 16), 2, 9);
-    for (let i = 0; i < cloudN; i++) clouds.push({ x: Math.random() * W * 1.2 - W * 0.1, y: (0.08 + Math.random() * 0.45) * horizonY, s: (0.6 + Math.random() * 1.1) * clamp(U / 700, 0.55, 1.25), sp: 0.004 + Math.random() * 0.01, op: 0.35 + Math.random() * 0.4 });
+    rain = []; snow = []; petals = []; pollen = []; flies = []; clouds = []; leaves = []; splashes = [];
+    // cloud cover: more, bigger and grayer clouds as it climbs; rain clouds darker still
+    const cov = X.cover, cu = clamp(U / 700, 0.55, 1.25);
+    const cloudN = cov < 0.06 ? 0 : Math.round(clamp(1 + cov * 11, 2, 12));
+    const tone0 = (cov < 0.6 ? 0 : cov < 0.85 ? 1 : 2) + (X.kind === "storm" ? 2 : X.kind !== "none" && X.inten > 0.3 ? 1 : 0);
+    for (let i = 0; i < cloudN; i++) {
+      const sz = (0.55 + Math.random() * 0.55 + cov * 0.7) * cu;
+      clouds.push({ x: Math.random() * W * 1.2 - W * 0.1, y: (0.06 + Math.random() * (0.32 + cov * 0.16)) * horizonY, s: sz,
+        sp: (0.6 + X.mph * 0.45) * (0.7 + Math.random() * 0.6) * (0.75 + sz * 0.25) * 0.05,   // px per 50ms frame: calm creeps, a gale races; bigger = nearer = faster
+        op: 0.4 + Math.random() * 0.35 + cov * 0.2, tone: clamp(tone0 - (Math.random() < 0.35 ? 1 : 0), 0, 3) });
+    }
     buildZenithField();
-    if (k === "rain") { const n = Math.round((state.weather.code >= 80 || state.weather.code >= 63 ? 240 : 150) * scale * heavy); for (let i = 0; i < n; i++) rain.push({ x: Math.random() * W, y: Math.random() * H, len: 9 + Math.random() * 14, sp: 7 + Math.random() * 6 }); }
-    if (k === "snow") { const n = Math.round(130 * scale * heavy); for (let i = 0; i < n; i++) snow.push({ x: Math.random() * W, y: Math.random() * H, r: 1 + Math.random() * 2.4, sp: 0.6 + Math.random() * 1.1, ph: Math.random() * 6.28 }); }
-    if (!calm && k === "clear") {
+    // precipitation in two depth layers (far: fine, faint, slow; near: bold, fast), sized by intensity
+    const I = X.inten;
+    const drops = (n, len0, len1, sp0, sp1) => {
+      for (let i = 0; i < n; i++) {
+        const near = Math.random() < 0.4;
+        rain.push({ x: Math.random() * W, y: Math.random() * H, near: near, len: (len0 + Math.random() * (len1 - len0)) * (near ? 1.15 : 0.7), sp: (sp0 + Math.random() * (sp1 - sp0)) * (near ? 1.15 : 0.8) });
+      }
+    };
+    if (X.kind === "drizzle") drops(Math.round((160 + 200 * I) * scale * heavy), 4, 8, 4, 6.5);
+    if (X.kind === "rain") drops(Math.round((70 + 300 * I) * scale * heavy), 8 + I * 8, 14 + I * 12, 7 + I * 3, 10 + I * 5);
+    if (X.kind === "storm") drops(Math.round(380 * scale * heavy), 16, 26, 11, 16);
+    if (X.kind === "sleet") drops(Math.round((90 + 120 * I) * scale * heavy), 4, 9, 8, 11);
+    if (X.kind === "snow" || X.kind === "sleet") {
+      const n = Math.round((X.kind === "sleet" ? 60 : 50 + 210 * I) * scale * heavy);
+      for (let i = 0; i < n; i++) {
+        const near = Math.random() < 0.35;
+        snow.push({ x: Math.random() * W, y: Math.random() * H, near: near, r: (1 + Math.random() * (1.4 + I * 1.4)) * (near ? 1.3 : 0.75), sp: (0.6 + Math.random() * (0.8 + I * 0.6)) * (near ? 1.2 : 0.8), ph: Math.random() * 6.28 });
+      }
+    }
+    if (X.kind === "none" && !calm) {
       // a chance of rain becomes a chance of raindrops: sparse above 30%, +12 drops per 10 points
       const pp = state.hourly && state.hourly.pp && state.hourly.pp.length ? state.hourly.pp[0] : 0;
-      if (pp > 30) {
-        const n = Math.round(((pp - 30) / 10) * 12 * scale * heavy);
-        for (let i = 0; i < n; i++) rain.push({ x: Math.random() * W, y: Math.random() * H, len: 7 + Math.random() * 9, sp: 6 + Math.random() * 5 });
-      }
+      if (pp > 30) drops(Math.round(((pp - 30) / 10) * 12 * scale * heavy), 7, 16, 6, 11);
+    }
+    // wind: from "windy" up, leaves tumble across the scene downwind
+    if (X.mph >= 12) {
+      const n = Math.round(clamp((X.mph - 10) * 0.8, 3, 16) * heavy);
+      for (let i = 0; i < n; i++) leaves.push(newLeaf(Math.random() * W));
     }
     if (th.ambient === "petals") { const n = Math.round(20 * scale * heavy); for (let i = 0; i < n; i++) petals.push({ x: Math.random() * W, y: Math.random() * H, r: 3 + Math.random() * 4, sp: 0.5 + Math.random() * 0.9, drift: (Math.random() - 0.5) * 0.6, rot: Math.random() * 6.28, rs: (Math.random() - 0.5) * 0.05, col: th.bloom[Math.floor(Math.random() * th.bloom.length)] }); }
     if (th.ambient === "pollen") { const n = Math.round(34 * scale * heavy); for (let i = 0; i < n; i++) pollen.push({ x: Math.random() * W, y: horizonY + Math.random() * (H - horizonY), r: 1 + Math.random() * 2, ph: Math.random() * 6.28, sp: 0.2 + Math.random() * 0.35 }); }
@@ -399,6 +484,8 @@
     const overcast = clamp((state.weather.cloud - 55) / 45, 0, 1) * (alt > 0.05 ? 0.4 : 0.15);
     top = mix(top, [176, 184, 190], overcast);
     hor = mix(hor, [206, 212, 214], overcast);
+    const gl = wx().gloom;                         // rain and storms pull the whole sky down toward slate
+    if (gl > 0) { top = mix(top, [100, 110, 122], gl); hor = mix(hor, [156, 163, 170], gl * 0.8); }
     if (th.warmBias > 0) hor = mix(hor, [242, 222, 206], th.warmBias * 0.22);
     if (th.warmBias < 0) top = mix(top, [150, 182, 212], -th.warmBias * 0.2);
     return { top: top, hor: hor };
@@ -530,8 +617,9 @@
   function drawCelestial() {
     const alt = sunAltitude();
     const lookUp = 1 - smooth(cam * 1.4);           // sun and moon bow out as you look overhead
-    const sunA = clamp(alt / 0.12, 0, 1) * lookUp;
-    const moonA = clamp(1 - alt / 0.14, 0, 1) * 0.92 * lookUp;
+    const X = wx(), veil = (1 - smooth((X.cover - 0.72) / 0.28) * 0.78) * (1 - X.gloom * 0.6);   // a gray deck veils them
+    const sunA = clamp(alt / 0.12, 0, 1) * lookUp * veil;
+    const moonA = clamp(1 - alt / 0.14, 0, 1) * 0.92 * lookUp * veil;
     sunHit = moonHit = null;
     if (moonA > 0.02) {
       const nf = nightFrac();
@@ -549,21 +637,55 @@
     }
   }
 
-  function puff(x, y, s, op) {
-    // one baked puff, drawn scaled — no per-frame gradients
-    const spr = sprite("puff", 200, 152, (g2) => {
+  // cloud tones: fair-weather white → gray undersides → overcast gray → rain slate
+  const PUFF_TONES = [["rgba(255,255,255,0.95)", "rgba(236,240,236,0)"], ["rgba(241,244,246,0.95)", "rgba(220,226,231,0)"],
+    ["rgba(214,220,226,0.95)", "rgba(193,200,208,0)"], ["rgba(170,178,189,0.95)", "rgba(148,156,168,0)"]];
+  function puff(x, y, s, op, tone) {
+    // one baked puff per tone, drawn scaled — no per-frame gradients
+    const tc = PUFF_TONES[tone || 0];
+    const spr = sprite("puff" + (tone || 0), 200, 152, (g2) => {
       const px = 100, py = 82, S = 1.6;
       for (const o of [[0, 0, 1], [-0.7, 0.15, 0.75], [0.7, 0.15, 0.75], [-0.35, -0.25, 0.7], [0.35, -0.2, 0.7]]) {
         const rr = 26 * S * o[2];
         const bx = px + o[0] * 30 * S, by = py + o[1] * 22 * S;
         const g = g2.createRadialGradient(bx, by, rr * 0.3, bx, by, rr);
-        g.addColorStop(0, "rgba(255,255,255,0.95)"); g.addColorStop(1, "rgba(236,240,236,0)");
+        g.addColorStop(0, tc[0]); g.addColorStop(1, tc[1]);
         g2.fillStyle = g; g2.beginPath(); g2.arc(bx, by, rr, 0, 6.2832); g2.fill();
       }
     });
     const k = s / 1.6;
     ctx.globalAlpha = clamp(op, 0, 1);
     ctx.drawImage(spr, x - 100 * k, y - 82 * k, 200 * k, 152 * k);
+    ctx.globalAlpha = 1;
+  }
+  // overcast: a soft gray stratus deck across the upper sky, baked once as a seamless tile and
+  // scrolled slowly downwind — the "whole sky is gray" state a few puffs can't show
+  let deckX = 0;
+  function drawDeck(a, X, night) {
+    const dw = Math.round(W * 1.2), dh = Math.round(horizonY * 0.62);
+    const tone = X.kind !== "none" ? 1 : 0;
+    const spr = sprite("deck:" + dw + ":" + dh + ":" + tone + ":" + (night ? 1 : 0), dw, dh, (g2) => {
+      const r = rng(77), c = night ? (tone ? "70,78,92" : "92,100,116") : (tone ? "164,172,183" : "208,214,220");
+      for (let i = 0; i < 48; i++) {
+        const bx = r() * dw, by = dh * (0.06 + r() * r() * 0.7), rx = dw * (0.07 + r() * 0.1), sy = 0.3 + r() * 0.2;
+        for (const ox of [-dw, 0, dw]) {                       // wrapped, so the tile repeats without a seam
+          g2.save(); g2.translate(bx + ox, by); g2.scale(1, sy);
+          const g = g2.createRadialGradient(0, 0, 0, 0, 0, rx);
+          g.addColorStop(0, "rgba(" + c + ",0.55)"); g.addColorStop(1, "rgba(" + c + ",0)");
+          g2.fillStyle = g; g2.beginPath(); g2.arc(0, 0, rx, 0, 6.2832); g2.fill();
+          g2.restore();
+        }
+      }
+      g2.globalCompositeOperation = "destination-in";            // thick overhead, thinning toward the horizon
+      const fade = g2.createLinearGradient(0, 0, 0, dh);
+      fade.addColorStop(0, "rgba(0,0,0,1)"); fade.addColorStop(0.55, "rgba(0,0,0,0.85)"); fade.addColorStop(1, "rgba(0,0,0,0)");
+      g2.fillStyle = fade; g2.fillRect(0, 0, dw, dh);
+    });
+    if (motionOn()) deckX += X.cdir * (0.3 + X.mph * 0.18) * 0.05 * FK;
+    let x = ((deckX % dw) + dw) % dw - dw;
+    while (x > -W * 0.4) x -= dw;
+    ctx.globalAlpha = a;
+    for (; x < W * 1.4; x += dw) ctx.drawImage(spr, x, 0, dw, dh);
     ctx.globalAlpha = 1;
   }
   // ponytail: clouds part for 90s after a double-tap, then drift back
@@ -585,10 +707,17 @@
   }
   function drawClouds() {
     cloudFade();
+    const X = wx(), mo = motionOn(), night = isNight();
+    const deckA = smooth((X.cover - 0.72) / 0.25) * (1 - clearK * 0.6);
+    if (deckA > 0.02) drawDeck(deckA, X, night);
     for (const c of clouds) {
-      if (motionOn()) { c.x += c.sp * (1 + state.weather.wind / 30) * FK; if (c.x - 80 * c.s > W) c.x = -90 * c.s; }
+      if (mo) {
+        c.x += c.sp * X.cdir * FK;                                // they sail the way the wind really blows
+        if (X.cdir > 0 && c.x - 90 * c.s > W) c.x = -90 * c.s;
+        else if (X.cdir < 0 && c.x + 90 * c.s < 0) c.x = W + 90 * c.s;
+      }
       const px = c.x + partShift(c.x);
-      if (px > -140 * c.s && px < W + 140 * c.s) puff(px, c.y + 30, c.s, c.op * (1 - clearK * 0.25));
+      if (px > -140 * c.s && px < W + 140 * c.s) puff(px, c.y + 30, c.s, c.op * (1 - clearK * 0.25) * (night ? 0.8 : 1), clamp(c.tone + (night ? 1 : 0), 0, 3));
     }
   }
   function partClouds() {
@@ -661,14 +790,14 @@
   let zoomScale = 1, zoomTimer = null;
   function applyZoom(scale, ox, oy) {
     zoomScale = scale;
-    if (ox != null) cv.style.transformOrigin = ox + "px " + oy + "px";
-    cv.style.transform = scale > 1.001 ? "scale(" + scale.toFixed(3) + ")" : "";
+    if (ox != null) zoomEl.style.transformOrigin = ox + "px " + oy + "px";
+    zoomEl.style.transform = scale > 1.001 ? "scale(" + scale.toFixed(3) + ")" : "";
   }
   function resetZoom() {
     if (zoomTimer) { clearTimeout(zoomTimer); zoomTimer = null; }
-    cv.style.transition = "transform 0.8s cubic-bezier(0.22,1,0.36,1)";
+    zoomEl.style.transition = "transform 0.8s cubic-bezier(0.22,1,0.36,1)";
     applyZoom(1);
-    setTimeout(() => { cv.style.transition = ""; }, 850);
+    setTimeout(() => { zoomEl.style.transition = ""; }, 850);
   }
   function scheduleZoomReset() {          // ten seconds after the last pinch, drift back out
     if (zoomTimer) clearTimeout(zoomTimer);
@@ -796,17 +925,6 @@
     hl.addColorStop(1, "rgba(255,255,255,0)");
     g2.fillStyle = hl; g2.fillRect(cx - span, gTop, span * 2, gh);
     g2.restore();
-  }
-  function drawVerseCloud(cx, cy, coverW, coverH, seed, alpha, night) {
-    const cw = Math.round(coverW / 8) * 8, ch = Math.round(coverH / 8) * 8;
-    const padX = ch * 1.05, padY = ch * 0.9;            // sprite margin for the puffs + soft edge
-    const spr = sprite("verse:" + seed + ":" + cw + ":" + ch + ":" + (night ? 1 : 0),
-      cw + padX * 2, ch + padY * 2, (g2) => {
-        paintVerseCloud(g2, cw / 2 + padX, ch / 2 + padY, cw, ch, seed, night);
-      });
-    ctx.globalAlpha = clamp(alpha, 0, 1);
-    ctx.drawImage(spr, cx - (cw / 2 + padX), cy - (ch / 2 + padY));
-    ctx.globalAlpha = 1;
   }
   function drawCirrus(cx, cy, sc, seed, alpha) {
     // mare's tails: swept wisps, each combed into fine bright fibers with an upturned hook
@@ -1004,7 +1122,6 @@
     }
   }
 
-  function windAmp() { return motionOn() ? clamp(state.weather.wind / 20, 0.2, 1.5) : 0; }
   function drawBushItem(g2, x, y, h, seed, P) {
     const r = rng(seed);
     const c0 = GE.hexA(GE.mixHex(GE.FOL[0], P.fol, P.folK), 0.96);
@@ -1069,7 +1186,10 @@
       for (const p of L.lilyPads) GE.pond.drawLilyPad(g2, L.pond, p, t, P);
       GE.pond.drawRipples(g2, L.pond, t, P, L.seed);
     }
-    for (const gr of L.grass) GE.drawGrass(g2, { x: gr.x, base: gr.base, len: gr.len, w: gr.w, ph: gr.ph, lean: gr.lean, t: t, P: P, wind: wind });
+    const lean = windLean();
+    for (const gr of L.grass) GE.drawGrass(g2, { x: gr.x, base: gr.base, len: gr.len, w: gr.w, ph: gr.ph, lean: gr.lean + lean, t: t, P: P, wind: wind });
+    // a tree or flower leans by shearing about its own base: the trunk stays planted, the crown goes downwind
+    const bow = (y, k, fn) => { if (Math.abs(k) < 0.004) return fn(); g2.save(); g2.transform(1, 0, k, 1, -k * y, 0); fn(); g2.restore(); };
     // aerial haze sits on the ground and grass; trees and flowers stand clear of it
     const G = H - horizonY;
     if (!floraHaze) {
@@ -1080,7 +1200,7 @@
     g2.fillStyle = floraHaze;
     g2.fillRect(-W * 0.4, horizonY, W * 1.8, G * 0.5);
     const items = [];
-    for (const tr of L.trees) items.push({ y: tr.y, d: () => GE.trees[tr.kind].draw(g2, { x: tr.x, baseY: tr.y, h: tr.h, seed: tr.seed, t: t, P: P, wind: wind }) });
+    for (const tr of L.trees) items.push({ y: tr.y, d: () => bow(tr.y, -lean * 0.09, () => GE.trees[tr.kind].draw(g2, { x: tr.x, baseY: tr.y, h: tr.h, seed: tr.seed, t: t, P: P, wind: wind })) });
     for (const f of L.flowers) {
       items.push({ y: f.y - 0.01, d: () => {
         const rr = GE.rng(f.seed + 3);
@@ -1091,8 +1211,8 @@
         g2.beginPath(); g2.ellipse(f.x + lw * 0.8, f.y - lw * 0.2, lw * 0.9, lw * 0.36, 0.7, 0, 6.2832); g2.fill();
       } });
       items.push({ y: f.y, d: () => {
-        if (f.kind === "bush") drawBushItem(g2, f.x, f.y, f.h, f.seed, P);
-        else GE.flowers[f.kind].draw(g2, { x: f.x, baseY: f.y, h: f.h, seed: f.seed, t: t, P: P, wind: wind });
+        if (f.kind === "bush") bow(f.y, -lean * 0.06, () => drawBushItem(g2, f.x, f.y, f.h, f.seed, P));
+        else bow(f.y, -lean * 0.2, () => GE.flowers[f.kind].draw(g2, { x: f.x, baseY: f.y, h: f.h, seed: f.seed, t: t, P: P, wind: wind }));
       } });
     }
     items.sort((a, b) => a.y - b.y);
@@ -1212,12 +1332,13 @@
     const G = H - horizonY;
     // perspective ripple lines: compressed and faint near the horizon, opening into bigger swells at her feet
     ctx.lineWidth = 1;
+    const chop = 0.6 + wx().sway * 0.5;                          // calm water ~0.65, a gale ~1.5
     const nLines = perfTier ? 11 : 15;
     for (let i = 0; i < nLines; i++) {
       const p = i / (nLines - 1), depth = p * p;                 // quadratic spacing = real perspective
       const yy = horizonY + G * (0.03 + depth * 0.95);
-      const amp = 2 + depth * 15;                                // waves grow toward the viewer
-      const spd = motionOn() ? T * 0.0011 * (0.6 + depth) : i;
+      const amp = (2 + depth * 15) * chop;                       // waves grow toward the viewer, and with the wind
+      const spd = motionOn() ? T * 0.0011 * (0.6 + depth) * (0.7 + chop * 0.35) : i;
       const o1 = Math.sin(spd + i * 1.7) * amp, o2 = Math.cos(spd * 0.8 + i * 2.3) * amp * 0.5;
       ctx.strokeStyle = "rgba(255,255,255," + (0.05 + depth * 0.22).toFixed(3) + ")";
       ctx.beginPath();
@@ -1232,8 +1353,8 @@
       const pp = ((i * 0.293 + flow * (0.4 + (i % 3) * 0.28)) % 1);
       const yy = horizonY + G * (0.08 + pp * 0.88);
       const xx = ((i * 0.618) % 1) * W * 1.2 - W * 0.1 + Math.sin(i * 2.1) * 22;
-      const len = 3 + pp * 15, edge = 1 - Math.abs(pp - 0.5) * 0.5;
-      ctx.globalAlpha = (0.05 + pp * 0.2) * edge;
+      const len = (3 + pp * 15) * chop, edge = 1 - Math.abs(pp - 0.5) * 0.5;
+      ctx.globalAlpha = (0.05 + pp * 0.2) * edge * (0.55 + chop * 0.35);
       ctx.strokeStyle = "#fff"; ctx.lineWidth = Math.max(0.7, pp * 1.6);
       ctx.beginPath();
       ctx.moveTo(xx - len, yy);
@@ -1467,25 +1588,83 @@
   }
 
   function drawWeather() {
-    const k = wxKind();
-    if (k === "rain") {
-      ctx.strokeStyle = "rgba(174,196,214,0.55)"; ctx.lineWidth = 1.2;
-      const wx = state.weather.wind / 8;
-      for (const d of rain) {
-        if (motionOn()) { d.y += d.sp * FK; d.x += wx * FK; if (d.y > H) { d.y = -10; d.x = Math.random() * W; } }
-        ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - wx, d.y + d.len); ctx.stroke();
+    const X = wx(), mo = motionOn(), slant = X.ex * X.mph / 7;     // sideways push per frame: the rain's angle
+    if (rain.length) {
+      const ice = X.kind === "sleet", fine = X.kind === "drizzle";
+      for (let layer = 0; layer < 2; layer++) {                    // one path per depth layer: hundreds of drops, two strokes
+        ctx.strokeStyle = ice ? (layer ? "rgba(222,234,244,0.72)" : "rgba(214,228,240,0.45)") : (layer ? "rgba(178,199,216,0.62)" : "rgba(170,192,210,0.36)");
+        ctx.lineWidth = (fine ? 0.8 : 1.1) * (layer ? 1.35 : 0.9);
+        ctx.beginPath();
+        for (const d of rain) {
+          if (d.near !== (layer === 1)) continue;
+          const vx = slant * d.sp / 10;
+          if (mo) {
+            d.y += d.sp * FK; d.x += vx * FK;
+            if (d.y > H) { d.y = -20 - Math.random() * 40; d.x = Math.random() * (W + 160) - 80; }
+            if (d.x > W + 80) d.x -= W + 160; else if (d.x < -80) d.x += W + 160;
+          }
+          ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - vx * d.len / d.sp, d.y - d.len);
+        }
+        ctx.stroke();
       }
-    } else if (k === "snow") {
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      for (const s of snow) {
-        if (motionOn()) { s.y += s.sp * FK; s.x += Math.sin(T * 0.001 + s.ph) * 0.6 * FK; if (s.y > H) { s.y = -6; s.x = Math.random() * W; } }
-        ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.2832); ctx.fill();
+      // heavy rain and storms throw up little splashes where the drops land
+      if ((X.kind === "rain" && X.inten >= 0.5) || X.kind === "storm") {
+        if (mo) {
+          for (let n = X.inten * 5 * FK; n > 0 && splashes.length < 48; n--) if (Math.random() < n) splashes.push({ x: Math.random() * W, y: horizonY + (H - horizonY) * (0.12 + Math.random() * 0.86), life: 1 });
+          splashes = splashes.filter(sp => (sp.life -= 0.15 * FK) > 0);
+        }
+        ctx.strokeStyle = "rgba(214,226,236,0.5)"; ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (const sp of splashes) {
+          const r = 1 + (1 - sp.life) * 6 * (0.5 + (sp.y - horizonY) / (H - horizonY));
+          ctx.moveTo(sp.x - r, sp.y); ctx.ellipse(sp.x, sp.y, r, r * 0.35, 0, Math.PI, Math.PI * 2);
+        }
+        ctx.stroke();
       }
-      ctx.globalAlpha = 1;
+    }
+    if (snow.length) {
+      const drift = slant * 0.4;
+      for (let layer = 0; layer < 2; layer++) {
+        ctx.fillStyle = layer ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.6)";
+        ctx.beginPath();
+        for (const f of snow) {
+          if (f.near !== (layer === 1)) continue;
+          if (mo) {
+            f.y += f.sp * FK; f.x += (Math.sin(T * 0.001 + f.ph) * 0.6 + drift * f.sp) * FK;
+            if (f.y > H) { f.y = -6; f.x = Math.random() * W; }
+            if (f.x > W + 10) f.x -= W + 20; else if (f.x < -10) f.x += W + 20;
+          }
+          ctx.moveTo(f.x + f.r, f.y); ctx.arc(f.x, f.y, f.r, 0, 6.2832);
+        }
+        ctx.fill();
+      }
+    }
+    if (leaves.length) {
+      const g = gustAt(T);
+      for (const lf of leaves) {
+        if (mo) {
+          lf.x += X.cdir * lf.vx * g * FK; lf.y += (Math.sin(T * 0.002 + lf.ph) * 0.9 + 0.12) * FK; lf.rot += lf.spin * g * FK;
+          if (lf.x > W + 20 || lf.x < -20 || lf.y > H + 10) Object.assign(lf, newLeaf(X.cdir > 0 ? -15 : W + 15));
+        }
+        ctx.save(); ctx.translate(lf.x, lf.y); ctx.rotate(lf.rot);
+        ctx.fillStyle = lf.col;
+        ctx.beginPath(); ctx.ellipse(0, 0, lf.s, lf.s * 0.42, 0, 0, 6.2832); ctx.fill();
+        ctx.restore();
+      }
     }
   }
 
-  let flashT = 0;
+  let flashT = 0, bolt = null;
+  function makeBolt() {                                             // a jagged main channel plus one fork
+    const main = [], x0 = W * (0.15 + Math.random() * 0.7), y1 = horizonY * (0.72 + Math.random() * 0.2);
+    let x = x0, y = horizonY * 0.03;
+    main.push([x, y]);
+    while (y < y1) { y += horizonY * (0.04 + Math.random() * 0.06); x += (Math.random() - 0.5) * W * 0.06; main.push([x, y]); }
+    const k = Math.floor(main.length * (0.3 + Math.random() * 0.3)), fork = [main[k]];
+    let fx = main[k][0], fy = main[k][1];
+    for (let i = 0; i < 4; i++) { fy += horizonY * 0.05; fx += (Math.random() < 0.5 ? -1 : 1) * W * (0.015 + Math.random() * 0.03); fork.push([fx, fy]); }
+    return [main, fork];
+  }
   function drawFog() {
     const k = wxKind();
     const haze = k === "fog" ? 0.5 : clamp(Math.round(((state.aqi || 0) - 80) / 120 * 50) / 50, 0, 0.4);
@@ -1500,8 +1679,19 @@
       ctx.fillStyle = g; ctx.fillRect(-W * 0.4, horizonY - H * 0.2, W * 1.8, H - horizonY + H * 0.2);
     }
     if (state.weather.code >= 95 && motionOn() && state.settings.skyMode !== "cycle") {
-      if (Math.random() < 0.004 * FK) flashT = 1;
-      if (flashT > 0) { ctx.fillStyle = "rgba(255,255,255," + (flashT * 0.35) + ")"; ctx.fillRect(0, 0, W, horizonY); flashT -= 0.08 * FK; }
+      if (Math.random() < 0.004 * FK) { flashT = 1; bolt = makeBolt(); }
+      if (flashT > 0) {
+        ctx.fillStyle = "rgba(255,255,255," + (flashT * 0.35) + ")"; ctx.fillRect(0, 0, W, horizonY);
+        if (bolt && flashT > 0.35) {                                // the bolt itself, glow then core
+          for (const [lw, al] of [[7, 0.22], [2.2, 0.95]]) {
+            ctx.strokeStyle = "rgba(255,252,240," + (al * flashT).toFixed(3) + ")"; ctx.lineWidth = lw; ctx.lineJoin = "round";
+            ctx.beginPath();
+            for (const seg of bolt) { ctx.moveTo(seg[0][0], seg[0][1]); for (let i = 1; i < seg.length; i++) ctx.lineTo(seg[i][0], seg[i][1]); }
+            ctx.stroke();
+          }
+        }
+        flashT -= 0.08 * FK;
+      }
     }
   }
 
@@ -1552,57 +1742,60 @@
   }
   let verseGapUntil = 0;
   function driftActive() { return state.settings.autoRotate && motionOn(); }
-  function drawSkyVerse() {
-    if (!state.curVerse || !sky.lines.length) return;
-    if (verseGapUntil) {
-      if (Date.now() < verseGapUntil) return;   // seven quiet seconds of open sky
-      verseGapUntil = 0;
-      setVerse(pickVerse());
-      return;
+  // ---------- the verse layer: its cloud and text are painted ONCE per verse into their own
+  // small canvas, then glided by the compositor (a GPU transform) on every display frame —
+  // a true 60fps drift for the crisp-edged text, while the heavy scene repaints at its own rate ----------
+  const vlay = { key: "", w: 0, h: 0, cOff: 0, x: NaN, y: NaN, a: -1 };
+  let verseTs = 0;
+  function paintVerseLayer(night) {
+    const nL = sky.lines.length, fs = sky.fs;
+    // the verse rides one opaque cloud, sized so every line and the reference sit on solid white
+    const cw = Math.round((sky.tw + fs * 0.4) / 8) * 8, ch = Math.round(((nL - 1) * sky.lh + fs * 2.28) / 8) * 8;
+    const padX = ch * 1.05, padY = ch * 0.9, LW = cw + padX * 2, LH = ch + padY * 2;
+    vlay.w = LW; vlay.h = LH; vlay.cOff = ((nL - 1) * sky.lh + fs * 0.72) / 2;   // cloud center below the first baseline
+    vl.width = Math.round(LW * DPR); vl.height = Math.round(LH * DPR);
+    vl.style.width = LW + "px"; vl.style.height = LH + "px";
+    vctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    paintVerseCloud(vctx, LW / 2, LH / 2, cw, ch, sky.cseed || 7, night);
+    const base = LH / 2 - vlay.cOff;
+    vctx.textAlign = "center"; vctx.textBaseline = "alphabetic";
+    vctx.font = verseFont(fs);
+    vctx.shadowColor = "rgba(40,60,30,0.16)";
+    vctx.shadowBlur = fs * 0.16;
+    vctx.fillStyle = night ? "#2B3440" : "#243420";
+    for (let i = 0; i < nL; i++) vctx.fillText(sky.lines[i], LW / 2, base + i * sky.lh);
+    vctx.shadowBlur = 0;
+    vctx.font = "600 " + Math.max(11, Math.round(fs * 0.44)) + "px 'DM Sans', sans-serif";
+    vctx.fillStyle = "#9A7636";
+    vctx.fillText(sky.ref.toUpperCase(), LW / 2, base + (nL - 1) * sky.lh + fs * 1.25);
+  }
+  // runs on EVERY animation frame, ahead of the scene's frame cap: only two style writes
+  function tickVerse(now) {
+    const dt = clamp(now - verseTs, 0, 80);
+    verseTs = now;
+    let a = 0, x = vlay.x, y = vlay.y;
+    if (state.curVerse && sky.lines.length) {
+      if (verseGapUntil && Date.now() >= verseGapUntil) { verseGapUntil = 0; setVerse(pickVerse()); }
+      if (!verseGapUntil) {                                   // (during the gap: seven quiet seconds of open sky)
+        if (driftActive() && !state.versePaused) {
+          sky.prog += dt / 42000;
+          if (sky.prog >= 0.9) verseGapUntil = Date.now() + 7000;   // alpha hits zero by 0.9
+        }
+        if (!driftActive()) sky.prog = 0.5;
+        const p = sky.prog;
+        a = verseGapUntil ? 0 : clamp(Math.min(p / 0.1, (1 - p) / 0.1, 1), 0, 1);
+        const night = sunAltitude() <= 0.09, key = sky.gen + ":" + (night ? 1 : 0) + ":" + DPR;
+        if (a > 0.01 && key !== vlay.key) { vlay.key = key; paintVerseLayer(night); }
+        const pe = 0.26 * p + 0.74 * (0.5 + 4 * Math.pow(p - 0.5, 3));   // quick entrance, slow crossing, quick exit
+        const cxp = (W + sky.tw) * (1 - pe) - sky.tw / 2;
+        const bob = motionOn() ? Math.sin(now * 0.0006) * U * 0.012 : 0;
+        x = cxp - vlay.w / 2;
+        y = sky.y + bob + camOffset() * 0.35 + vlay.cOff - vlay.h / 2;   // rides mid-parallax as she looks up
+      }
     }
-    const dt = clamp(T - lastTs, 0, 80);
-    if (driftActive() && !state.versePaused && !document.hidden) {
-      sky.prog += dt / 42000;
-      if (sky.prog >= 0.9) { verseGapUntil = Date.now() + 7000; return; }   // alpha hits zero by 0.9
-    }
-    if (!driftActive()) sky.prog = 0.5;
-    const p = sky.prog;
-    // quick entrance, slow crossing, quick exit
-    const pe = 0.26 * p + 0.74 * (0.5 + 4 * Math.pow(p - 0.5, 3));
-    const cxp = (W + sky.tw) * (1 - pe) - sky.tw / 2;
-    const bob = motionOn() ? Math.sin(T * 0.0006) * U * 0.012 : 0;
-    const yTop = sky.y + bob;
-    const a = clamp(Math.min(p / 0.1, (1 - p) / 0.1, 1), 0, 1);
-    if (a <= 0.01) return;
-    const nightMode = sunAltitude() <= 0.09;
-    // the verse rides one opaque cloud, sized so every line and the reference sit on solid white.
-    // font math: text runs from the first line's caps down past the gold reference line.
-    const nL = sky.lines.length;
-    const boxTop = yTop - sky.fs * 0.78;
-    const boxBot = yTop + (nL - 1) * sky.lh + sky.fs * 1.5;
-    const coverW = sky.tw + sky.fs * 0.4;
-    const coverH = boxBot - boxTop;
-    drawVerseCloud(cxp, (boxTop + boxBot) / 2, coverW, coverH, sky.cseed || 7, a, nightMode);
-    // the text (and its soft shadow) is painted once per verse at full device resolution, then
-    // blitted: no per-frame blur pass, and the slow drift glides on sub-pixels instead of snapping
-    const padX = sky.fs * 0.5, top = sky.fs * 1.1, tw = Math.max(sky.tw, sky.rw || 0) + padX * 2, th = boxBot - boxTop + sky.fs * 0.6;
-    const spr = sprite("vtext:" + sky.gen + ":" + (nightMode ? 1 : 0) + ":" + DPR, tw * DPR, th * DPR, (g2) => {
-      g2.scale(DPR, DPR);
-      g2.textAlign = "center";
-      g2.textBaseline = "alphabetic";
-      g2.font = verseFont(sky.fs);
-      g2.shadowColor = "rgba(40,60,30,0.16)";
-      g2.shadowBlur = sky.fs * 0.16;   // device px, exactly as before (shadowBlur ignores the transform)
-      g2.fillStyle = nightMode ? "#2B3440" : "#243420";
-      for (let i = 0; i < nL; i++) g2.fillText(sky.lines[i], tw / 2, top + i * sky.lh);
-      g2.shadowBlur = 0;
-      g2.font = "600 " + Math.max(11, Math.round(sky.fs * 0.44)) + "px 'DM Sans', sans-serif";
-      g2.fillStyle = "#9A7636";
-      g2.fillText(sky.ref.toUpperCase(), tw / 2, top + (nL - 1) * sky.lh + sky.fs * 1.25);
-    });
-    ctx.globalAlpha = a;
-    ctx.drawImage(spr, cxp - tw / 2, yTop - top, tw, th);
-    ctx.globalAlpha = 1;
+    if (x !== vlay.x || y !== vlay.y) { vl.style.transform = "translate3d(" + x.toFixed(2) + "px," + y.toFixed(2) + "px,0)"; vlay.x = x; vlay.y = y; }
+    a = Math.round(a * 100) / 100;
+    if (a !== vlay.a) { vl.style.opacity = a; vlay.a = a; }
   }
 
   const perfNow = () => (window.performance && performance.now) ? performance.now() : (T || 0);
@@ -1610,6 +1803,7 @@
     requestAnimationFrame(frame);
     const now = ts || 0;
     if (document.hidden) return;                    // the browser pauses rAF when hidden; guard anyway
+    tickVerse(now);                                 // the verse glides every display frame, whatever the scene's cap
     // battery: cap the frame rate. The scene is atmospheric — 40fps while she interacts, 26 while it
     // breathes on its own, a trickle when everything is still. A capped loop draws far less than 60fps.
     // Full display rate while her finger is on it; an even 30 (every 2nd vsync, no judder) while
@@ -1653,10 +1847,6 @@
     drawAmbient();
     drawWeather();
     drawFog();
-    ctx.save();
-    ctx.translate(0, oy * 0.35);                    // verse cloud rides mid-parallax
-    drawSkyVerse();
-    ctx.restore();
     drawSkyHud();
     document.body.classList.toggle("skyview", cam > 0.25);   // chrome bows out while looking up
 
@@ -1742,9 +1932,22 @@
     el("hb-cloud-link").href = gq("cloud cover forecast");
     const aqiEl = el("cond-aqi");
     aqiEl.href = gq("air quality");
-    if (state.aqi != null) { aqiEl.style.display = ""; el("cond-aqi-text").innerHTML = "Air <b>" + state.aqi + "</b>"; }
-    else aqiEl.style.display = "none";
+    if (state.aqi != null) el("cond-aqi-text").innerHTML = "Air <b>" + state.aqi + "</b>";
+    applyExtras();
     updateHoursBar();
+  }
+  // the extra main-screen buttons (More settings): each is hidden until she switches it on
+  function applyExtras() {
+    const x = state.settings.extras || {};
+    el("open-daily").style.display = x.daily ? "" : "none";
+    ["hb-rain-link", "hb-wind-link", "hb-cloud-link"].forEach(id => { el(id).style.display = x.chips ? "" : "none"; });
+    el("cond-aqi").style.display = x.aqi && state.aqi != null ? "" : "none";
+    const bar = document.querySelector(".hours-bar");
+    bar.dataset.chips = x.chips ? "1" : "0"; bar.dataset.daily = x.daily ? "1" : "0";
+    document.querySelectorAll("#extras-seg button").forEach(b => {
+      const on = !!x[b.dataset.x];
+      b.classList.toggle("on", on); b.setAttribute("aria-pressed", on ? "true" : "false");
+    });
   }
   function updateHoursBar() {
     const h = state.hourly;
@@ -2030,11 +2233,15 @@
     radarMap = g;
     grid.dataset.built = "5/" + g.x5 + "/" + g.y5;   // rebuilt when her location moves the window
   }
-  // radar map: two fingers pinch to grow the map up to ~5x the view; one finger still pans it
+  // Radar map gestures, all handled here (touch-action:none, as map libraries do — with
+  // pan-x/pan-y the browser read a two-finger pinch as a pan and cancelled it mid-gesture):
+  // one finger pans and glides on when let go, two fingers pinch (and drag) up to 3x, and a
+  // double-tap opens the map full-screen; the close button (or another double-tap) brings it back.
   function setupRadarZoom() {
-    const view = el("map-view"), wrap = el("map-wrap"); if (!view || !wrap) return;
+    const view = el("map-view"), wrap = el("map-wrap"), sheet = el("sheet-radar"); if (!view || !wrap) return;
+    view.style.touchAction = "none";
     const pts = new Map();
-    let startDist = 0, startZoom = 1, mz = 1;
+    let startDist = 0, startZoom = 1, mz = 1, mid = null, last = null, vx = 0, vy = 0, glide = 0, tap = null, lastTap = null;
     function setZoom(z, midX, midY) {
       z = clamp(z, 1, 3);                      // base width × 3 ≈ a close look at her county
       const prev = mz; mz = z;
@@ -2046,23 +2253,63 @@
       }
       el("map-zoom-reset").style.display = mz > 1.02 ? "" : "none";
     }
+    function toggleFull(on) {
+      on = on != null ? on : !sheet.classList.contains("full");
+      const fx = (view.scrollLeft + view.clientWidth / 2) / view.scrollWidth, fy = (view.scrollTop + view.clientHeight / 2) / view.scrollHeight;
+      sheet.classList.toggle("full", on);
+      sheet.querySelector(".sheet-close").setAttribute("aria-label", on ? "Exit full screen" : "Close");
+      view.scrollLeft = fx * view.scrollWidth - view.clientWidth / 2;   // the same spot stays mid-view
+      view.scrollTop = fy * view.scrollHeight - view.clientHeight / 2;
+    }
+    const centroid = () => { const p = [...pts.values()]; return { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2, d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1 }; };
     view.addEventListener("pointerdown", e => {
+      cancelAnimationFrame(glide); glide = 0;
+      try { view.setPointerCapture(e.pointerId); } catch (err) {}
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pts.size === 2) { const p = [...pts.values()]; startDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1; startZoom = mz; }
+      if (pts.size === 1) { last = { x: e.clientX, y: e.clientY, t: e.timeStamp }; vx = vy = 0; tap = { x: e.clientX, y: e.clientY, t: e.timeStamp }; }
+      if (pts.size === 2) { mid = centroid(); startDist = mid.d; startZoom = mz; tap = null; }
     });
     view.addEventListener("pointermove", e => {
       if (!pts.has(e.pointerId)) return;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pts.size === 2) {
-        const p = [...pts.values()], dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
-        setZoom(startZoom * dist / startDist, (p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2);
-        e.preventDefault();
+        const c = centroid();
+        setZoom(startZoom * c.d / startDist, c.x, c.y);
+        view.scrollLeft -= c.x - mid.x; view.scrollTop -= c.y - mid.y;   // two fingers drag the map as they pinch
+        mid = c;
+      } else if (pts.size === 1 && last) {
+        const dx = e.clientX - last.x, dy = e.clientY - last.y, dt = Math.max(1, e.timeStamp - last.t);
+        view.scrollLeft -= dx; view.scrollTop -= dy;
+        vx = vx * 0.5 + dx / dt * 0.5; vy = vy * 0.5 + dy / dt * 0.5;   // px/ms, smoothed for the glide
+        last = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+        if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 10) tap = null;
       }
+      e.preventDefault();
     });
-    const end = e => pts.delete(e.pointerId);
+    const end = e => {
+      if (!pts.has(e.pointerId)) return;
+      pts.delete(e.pointerId);
+      if (pts.size === 1) { const p = [...pts.values()][0]; last = { x: p.x, y: p.y, t: e.timeStamp }; vx = vy = 0; return; }   // pinch → pan, no jump
+      if (pts.size) return;
+      if (e.type === "pointerup" && tap && e.timeStamp - tap.t < 300) {
+        if (lastTap && e.timeStamp - lastTap.t < 340 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40) { lastTap = null; toggleFull(); return; }
+        lastTap = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+      }
+      if (last && e.timeStamp - last.t < 80 && Math.hypot(vx, vy) > 0.12) {   // let go mid-swipe: it glides on and settles
+        let t0 = 0;
+        const step = now => {
+          const dt = t0 ? Math.min(40, now - t0) : 16; t0 = now;
+          view.scrollLeft -= vx * dt; view.scrollTop -= vy * dt;
+          const k = Math.pow(0.995, dt); vx *= k; vy *= k;
+          glide = Math.hypot(vx, vy) > 0.02 ? requestAnimationFrame(step) : 0;
+        };
+        glide = requestAnimationFrame(step);
+      }
+    };
     view.addEventListener("pointerup", end);
     view.addEventListener("pointercancel", end);
     el("map-zoom-reset").onclick = () => setZoom(1);
+    sheet.querySelector(".sheet-close").onclick = () => { if (sheet.classList.contains("full")) toggleFull(false); else closeSheet(); };
     view.__resetZoom = () => setZoom(1);
   }
   // Start (or reuse) the 4-tile download for one frame. When the LAST tile lands, the frame
@@ -2345,23 +2592,16 @@
     const l2row = el("loc2-row");
     if (l2row) l2row.style.display = hoursView === 1 || (!state.loc2 && hoursView === 0) ? (hoursView === 1 ? "" : "none") : "none";
     if (!h || !h.t.length) {
-      el("hours-temp").innerHTML = el("hours-rain").innerHTML = el("hours-wind").innerHTML = "<p class='empty-note'>Fetching the sky over " + (hoursView === 1 ? state.loc2 : state.loc).place.split(",")[0] + "...</p>";
+      el("hours-temp").innerHTML = "<p class='empty-note'>Fetching the sky over " + (hoursView === 1 ? state.loc2 : state.loc).place.split(",")[0] + "...</p>";
       return;
     }
-    const rainEl = el("hours-rain"), windEl = el("hours-wind"), tempEl = el("hours-temp"), cloudEl = el("hours-cloud");
-    let rh = "", wh = "", ch = "";
-    const n = Math.min(12, h.t.length);
-    for (let i = 0; i < n; i++) {
-      rh += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar'><i style='width:" + clamp(h.pp[i], 2, 100) + "%'></i></span><span class='hval'>" + h.pp[i] + "% <small>" + (+h.pr[i]).toFixed(2) + " in</small></span></div>";
-      wh += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar wind'><i style='width:" + clamp(h.ws[i] / 32 * 100, 3, 100) + "%'></i></span><span class='hval'><span class='harrow' style='transform:rotate(" + ((h.wd[i] + 180) % 360) + "deg)'>&#8593;</span> " + Math.round(h.ws[i]) + " <small>g " + Math.round(h.wg[i]) + " mph</small></span></div>";
-    }
+    const tempEl = el("hours-temp"), cloudEl = el("hours-cloud");
+    let ch = "";
     const place = hoursView === 1 ? state.loc2.place : state.loc.place;
     el("hours-google").href = "https://www.google.com/search?q=" + encodeURIComponent("hourly weather " + place);
     for (let i = 0; i < Math.min(8, h.t.length); i++) {
       ch += "<div class='hour-row'><span class='hlab'>" + hourLabel(h.t[i], i) + "</span><span class='hbar cloud'><i style='width:" + clamp(h.cc[i], 2, 100) + "%'></i></span><span class='hval'>" + h.cc[i] + "% <small>" + Math.round(h.tp[i]) + "&deg;</small></span></div>";
     }
-    rainEl.innerHTML = rh;
-    windEl.innerHTML = wh;
     const wk = hoursView === 1 ? state.week2 : state.week;
     tempEl.innerHTML = wk ? renderWeek(wk) : "<p class='empty-note'>Gathering the week's hours…</p>";
     if (wk) wireWeek(wk);
@@ -2594,9 +2834,8 @@
     { sel: "#loc-chip", title: "Where she is", body: "Tap the town name to move the whole garden anywhere. Everything refreshes to that place's real sky." },
     { sel: "#temp-link", title: "Today's sky", body: "The live temperature and conditions right now. Tap it to see the temperature hour by hour, the way Google shows it." },
     { sel: null, title: "Scripture on the clouds", body: "A verse drifts across the sky on its own white cloud. Tap anywhere in the sky for a new one — or pause and step it with the buttons up there." },
-    { sel: "#open-hours", title: "Hourly sky", body: "The weather book: temperature, rain, and wind hour by hour — for her town and one more place she picks." },
-    { sel: "#open-daily", title: "Ten-day forecast", body: "New. The whole week ahead and more. Tap any day for feels-like, wind, UV, sunrise, sunset, and that night's moon." },
-    { sel: "#open-radar", title: "Rain radar", body: "A live rain map centered on her town, a little pin where she is. Drag it to look around the region." },
+    { sel: "#open-hours", title: "Hourly sky", body: "The week's temperatures, hour by hour — it opens on its own when the app starts. Swipe sideways through seven days, for her town and one more place she picks." },
+    { sel: "#open-radar", title: "Rain radar", body: "A live rain map centered on her town, a little pin where she is. Drag it to look around, pinch to zoom in, and double-tap to fill the screen." },
     { sel: "#open-scenes", title: "Gardens & scenes", body: "Five gardens, a Catskill evening, and a maker for her own. While planting, tuck the tray away with its chevron to plant right up at the front." },
     { sel: "#sail-toggle", title: "The river", body: "Turn the garden into a river with a sailing sloop. In sailing mode a Routes planner appears — plan a voyage, or a road trip that names every town and its sky." },
     { sel: "#open-compass", title: "Compass & stars", body: "The rose follows the phone in her hand. Switch to the star finder to see which constellations are overhead right now." },
@@ -2759,6 +2998,7 @@
   function closeSheet() {
     document.body.classList.remove("starfield");
     document.querySelectorAll(".sheet").forEach(s => s.classList.remove("open"));
+    el("sheet-radar").classList.remove("full");
     el("sheet-backdrop").classList.remove("open");
     if (THEMES["__preview__"] && state.themeId === "__preview__") { state.themeId = store.themeId || "secret-garden"; if (state.themeId === "__preview__") state.themeId = "secret-garden"; delete THEMES["__preview__"]; buildThemeChips(); buildScene(); }
   }
@@ -3346,6 +3586,11 @@
       state.loc = g; persist(); refreshData(); el("about-loc").textContent = g.place; el("city-input").value = ""; toast("Set to " + g.place);
     };
     el("city-input").addEventListener("keydown", e => { if (e.key === "Enter") el("city-go").click(); });
+    document.querySelectorAll("#extras-seg button").forEach(b => b.onclick = () => {
+      const x = state.settings.extras = Object.assign({}, state.settings.extras);
+      x[b.dataset.x] = !x[b.dataset.x];
+      persist(); applyExtras();
+    });
     el("motion-toggle").onclick = () => { state.settings.motion = !state.settings.motion; el("motion-toggle").classList.toggle("on", state.settings.motion); persist(); initParticles(); };
     el("rotate-toggle").onclick = () => { state.settings.autoRotate = !state.settings.autoRotate; el("rotate-toggle").classList.toggle("on", state.settings.autoRotate); persist(); };
     document.querySelectorAll("#skymode-seg button").forEach(b => b.onclick = () => {
@@ -3359,7 +3604,6 @@
     // her temperature opens the hour-by-hour graph right here, not Google in another app
     el("temp-link").onclick = e => {
       e.preventDefault();
-      el("hours-tabs").querySelector("[data-t=temp]").click();
       hoursView = 0; openSheet("hours");
     };
     el("open-daily").onclick = () => { renderDaily(); openSheet("daily"); if (!state.daily) fetchDaily(); };
@@ -3384,13 +3628,6 @@
     el("loc2-go").onclick = setLoc2;
     el("loc2-input").addEventListener("keydown", e => { if (e.key === "Enter") setLoc2(); });
     el("open-radar").onclick = () => { const v = el("map-view"); if (v && v.__resetZoom) v.__resetZoom(); openRadar(); };
-    document.querySelectorAll("#hours-tabs button").forEach(b => b.onclick = () => {
-      document.querySelectorAll("#hours-tabs button").forEach(x => x.classList.toggle("on", x === b));
-      el("hours-rain").style.display = b.dataset.t === "rain" ? "" : "none";
-      el("hours-wind").style.display = b.dataset.t === "wind" ? "" : "none";
-      el("hours-temp").style.display = b.dataset.t === "temp" ? "" : "none";
-      const pg = el("wk-pages"); if (pg) pg.scrollLeft = wkIdx * pg.clientWidth;   // hidden, it couldn't hold its place
-    });
     let satThrottle = 0;
     el("sat-scrub").oninput = () => {   // throttle while dragging so we don't flood the tile server
       const now = Date.now();
@@ -3461,7 +3698,7 @@
         pinchStartDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1;
         pinchStartScale = zoomScale;
         pinchOx = (p[0].x + p[1].x) / 2; pinchOy = (p[0].y + p[1].y) / 2;
-        cv.style.transition = ""; pinching = true;
+        zoomEl.style.transition = ""; pinching = true;
         if (zoomTimer) { clearTimeout(zoomTimer); zoomTimer = null; }
         return;
       }
@@ -3604,7 +3841,14 @@
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshData(); });
     registerSW();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutVerse);
+    applyExtras();
     if (!state.settings.tourSeen) { state.settings.tourSeen = true; persist(); setTimeout(openTour, 1200); }
+    else setTimeout(() => openSheet("hours"), 500);   // every start opens on the week's temperatures
+    let hiddenAt = 0;                                 // ...and so does coming back after 15+ minutes away
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) { hiddenAt = Date.now(); return; }
+      if (hiddenAt && Date.now() - hiddenAt > 900000 && !document.querySelector(".sheet.open") && el("coach").hidden) openSheet("hours");
+    });
     requestAnimationFrame(frame);
   }
 

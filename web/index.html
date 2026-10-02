@@ -162,16 +162,7 @@
       <button class="btn" id="loc2-go">Set</button>
     </div>
   </div>
-  <div class="field">
-    <div class="seg" id="hours-tabs">
-      <button data-t="temp" class="on">Temperature</button>
-      <button data-t="rain">Rain</button>
-      <button data-t="wind">Wind</button>
-    </div>
-  </div>
   <div class="hours-panel" id="hours-temp"></div>
-  <div class="hours-panel" id="hours-rain" style="display:none"></div>
-  <div class="hours-panel" id="hours-wind" style="display:none"></div>
   <a class="daily-google" id="hours-google" target="_blank" rel="noopener">See the hours on Google Weather &#8599;</a>
 </section>
 
@@ -211,7 +202,7 @@
     <div class="sat-row"><span id="sat-time">Latest radar</span><button class="chip" id="map-zoom-reset" style="display:none">Reset zoom</button><button class="chip" id="radar-toggle">Rain radar on</button></div>
   </div>
   <div id="hours-cloud"></div>
-  <p class="about credit">Map &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Radar by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>, with NOAA NEXRAD via <a href="https://mesonet.agron.iastate.edu/" target="_blank" rel="noopener">Iowa State</a> as backup. Drag the map to look around.</p>
+  <p class="about credit">Map &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Radar by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>, with NOAA NEXRAD via <a href="https://mesonet.agron.iastate.edu/" target="_blank" rel="noopener">Iowa State</a> as backup. Drag to look around, pinch to zoom, double-tap for full screen.</p>
 </section>
 
 <section class="sheet" id="sheet-verses" role="dialog" aria-label="Her verses">
@@ -357,6 +348,15 @@
     <p class="about binds-hint">Press and hold a part of the garden to open a tool. Tap any shortcut to change what it opens.</p>
     <div id="binds-list"></div>
     <div class="seg"><button id="binds-reset">Reset to defaults</button></div>
+  </div>
+  <div class="field">
+    <label>More settings</label>
+    <p class="about binds-hint">Extra buttons for the main screen. They stay hidden until you switch them on.</p>
+    <div class="seg" id="extras-seg">
+      <button data-x="daily" aria-pressed="false">10-day forecast</button>
+      <button data-x="chips" aria-pressed="false">Rain, wind &amp; cloud</button>
+      <button data-x="aqi" aria-pressed="false">Air quality</button>
+    </div>
   </div>
   <div class="field about">
     <label>About</label>
