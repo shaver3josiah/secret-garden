@@ -95,8 +95,9 @@
     return THEMES[state.themeId] || THEMES["secret-garden"];
   }
 
+  let preCreatorTheme = null;   // the theme she had before the creator's live preview took over
   function persist() {
-    save({ loc: state.loc, themeId: state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, daily: state.daily, sun: state.sun, aqi: state.aqi, trip: state.trip, favs: state.favs, loc2: state.loc2, hourly2: state.hourly2, week: state.week, week2: state.week2 });
+    save({ loc: state.loc, themeId: state.themeId === "__preview__" ? (preCreatorTheme || "secret-garden") : state.themeId, custom: state.custom, customVerses: state.customVerses, sail: { on: state.sail.on, stops: state.sail.stops, speed: state.sail.speed }, settings: state.settings, weather: state.weather, hourly: state.hourly, daily: state.daily, sun: state.sun, aqi: state.aqi, trip: state.trip, favs: state.favs, loc2: state.loc2, hourly2: state.hourly2, week: state.week, week2: state.week2 });
   }
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -1221,7 +1222,7 @@
 
   // robin and nest live in the willow: fly in, feed the chicks, keep watch, fly off (40s loop)
   function drawRobinVignette(P, t) {
-    const w = L.willow; if (!w) return;
+    const w = L.willow; if (!w) { nestHit = null; return; }
     const s = Math.max(0.7, w.h / 220);
     const nest = { x: w.x + w.h * 0.24, y: w.y - w.h * 0.52 };
     nestHit = { x: nest.x, y: nest.y, r: Math.max(34, s * 18) };   // tap the nest to open the tour
@@ -1750,7 +1751,7 @@
   function paintVerseLayer(night) {
     const nL = sky.lines.length, fs = sky.fs;
     // the verse rides one opaque cloud, sized so every line and the reference sit on solid white
-    const cw = Math.round((sky.tw + fs * 0.4) / 8) * 8, ch = Math.round(((nL - 1) * sky.lh + fs * 2.28) / 8) * 8;
+    const cw = Math.round((Math.max(sky.tw, sky.rw || 0) + fs * 0.4) / 8) * 8, ch = Math.round(((nL - 1) * sky.lh + fs * 2.28) / 8) * 8;
     const padX = ch * 1.05, padY = ch * 0.9, LW = cw + padX * 2, LH = ch + padY * 2;
     vlay.w = LW; vlay.h = LH; vlay.cOff = ((nL - 1) * sky.lh + fs * 0.72) / 2;   // cloud center below the first baseline
     vl.width = Math.round(LW * DPR); vl.height = Math.round(LH * DPR);
@@ -1921,6 +1922,7 @@
     return ["Sky", "☁️"];
   }
   function updateConditions() {
+    document.body.classList.toggle("night", isNight());   // light header text over a dark sky
     el("cond-place").textContent = state.loc.place;
     const w = wxLabel(state.weather.code);
     el("cond-wx-glyph").innerHTML = wxIcon(state.weather.code, !state.weather.isDay, 20);
@@ -1961,8 +1963,9 @@
     try {
       const { lat, lon } = state.loc;
       const url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&current=temperature_2m,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,is_day,precipitation&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m&daily=sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=7";
-      const r = await fetch(url); if (!r.ok) throw 0;
+      const loc = state.loc, r = await fetch(url); if (!r.ok) throw 0;
       const j = await r.json(), c = j.current;
+      if (state.loc !== loc) return;   // she moved while this was in flight
       state.weather = { code: c.weather_code, temp: Math.round(c.temperature_2m), cloud: c.cloud_cover, wind: c.wind_speed_10m, windDir: c.wind_direction_10m, isDay: c.is_day, precip: c.precipitation };
       if (j.daily && j.daily.sunrise) state.sun = { sunrise: minutesOf(j.daily.sunrise[0]), sunset: minutesOf(j.daily.sunset[0]), off: j.utc_offset_seconds != null ? j.utc_offset_seconds : null };
       if (j.hourly && j.hourly.time) {
@@ -2005,8 +2008,9 @@
       const url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon +
         "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant" +
         "&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=10";
-      const r = await fetch(url); if (!r.ok) { dailyFail(); return; }
+      const loc = state.loc, r = await fetch(url); if (!r.ok) { dailyFail(); return; }
       const j = await r.json(), d = j.daily;
+      if (state.loc !== loc) return;
       if (!d || !d.time) { dailyFail(); return; }
       state.daily = {
         time: d.time, code: d.weather_code, tmax: d.temperature_2m_max, tmin: d.temperature_2m_min,
@@ -2029,8 +2033,9 @@
     try {
       const { lat, lon } = state.loc;
       const url = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + lat + "&longitude=" + lon + "&current=us_aqi&timezone=auto";
-      const r = await fetch(url); if (!r.ok) return;
+      const loc = state.loc, r = await fetch(url); if (!r.ok) return;
       const j = await r.json();
+      if (state.loc !== loc) return;
       state.aqi = j.current && j.current.us_aqi != null ? Math.round(j.current.us_aqi) : null;
       persist(); updateConditions();
     } catch (e) {}
@@ -2113,6 +2118,7 @@
     clearTimeout(radarRetry);
     if (!got && radarOpen()) radarRetry = setTimeout(() => { if (radarOpen()) fetchRadar(); }, 20000);
   }
+  const US_STATES = { AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware", DC: "District of Columbia", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming" };
   async function geocode(q) {
     try {
       const parts = q.split(",").map(s => s.trim()).filter(Boolean);
@@ -2125,13 +2131,18 @@
       if (region) {
         const hit = j.results.find(x => {
           const a1 = (x.admin1 || "").toUpperCase();
-          const initials = a1.split(" ").map(w => w[0] || "").join("");
-          return a1 === region || a1.startsWith(region) || initials === region;
+          return a1 === region || a1 === (US_STATES[region] || "").toUpperCase();
         });
         if (hit) g = hit;
       }
       return { lat: +g.latitude.toFixed(4), lon: +g.longitude.toFixed(4), place: g.name + (g.admin1 ? ", " + g.admin1 : "") };
     } catch (e) { return null; }
+  }
+  // a new home place: drop the old town's forecast so it can't show under the new name
+  function setLoc(loc) {
+    state.loc = loc;
+    state.hourly = state.week = state.daily = state.aqi = null;
+    persist(); refreshData();
   }
   function refreshData() {
     fetchWeather(); fetchDaily(); fetchAqi();
@@ -2799,6 +2810,7 @@
     });
   }
   function previewCreator() {
+    if (state.themeId !== "__preview__") preCreatorTheme = state.themeId;
     state.themeId = "__preview__";
     THEMES["__preview__"] = { name: "Preview", foliage: FOLIAGE_SETS[CREATOR.foliage], bloom: BLOOM_SETS[CREATOR.bloom], ambient: CREATOR.ambient, water: CREATOR.water && CREATOR.slate !== "blank", density: CREATOR.density, warmBias: CREATOR.warmBias, slate: CREATOR.slate };
     buildScene();
@@ -3000,8 +3012,19 @@
     document.querySelectorAll(".sheet").forEach(s => s.classList.remove("open"));
     el("sheet-radar").classList.remove("full");
     el("sheet-backdrop").classList.remove("open");
-    if (THEMES["__preview__"] && state.themeId === "__preview__") { state.themeId = store.themeId || "secret-garden"; if (state.themeId === "__preview__") state.themeId = "secret-garden"; delete THEMES["__preview__"]; buildThemeChips(); buildScene(); }
+    window.removeEventListener("deviceorientationabsolute", onHeading);   // sensor off: battery
+    window.removeEventListener("deviceorientation", onHeading);
+    if (THEMES["__preview__"] && state.themeId === "__preview__") { state.themeId = THEMES[preCreatorTheme] ? preCreatorTheme : "secret-garden"; delete THEMES["__preview__"]; buildThemeChips(); buildScene(); }
   }
+  // Android back button (MainActivity asks this first): peel back one layer, true = handled,
+  // false = nothing open, so the shell exits as before
+  window.sgBack = () => {
+    if (coachOpen) { closeTour(); return true; }
+    if (el("sheet-radar").classList.contains("full")) { el("sheet-radar").querySelector(".sheet-close").click(); return true; }
+    if (document.querySelector(".sheet.open")) { closeSheet(); return true; }
+    if (placing) { stopPlacing(); return true; }
+    return false;
+  };
 
   function openAbout() {
     el("about-moon").textContent = moonName(moonPhase());
@@ -3211,6 +3234,8 @@
   }
   function openCompass() {
     openSheet("compass");
+    window.addEventListener("deviceorientationabsolute", onHeading);
+    window.addEventListener("deviceorientation", onHeading);
     if (starMode) document.body.classList.add("starfield");
     refreshSkyList();
     drawConstPreview();
@@ -3473,7 +3498,7 @@
       const go = document.createElement("button");
       go.className = "mini" + (state.loc.place === s.name ? " here" : "");
       go.textContent = state.loc.place === s.name ? "Here" : "Sail here";
-      go.onclick = () => { state.loc = { lat: s.lat, lon: s.lon, place: s.name }; persist(); refreshData(); renderRoute(); toast("Sailing to " + s.name.split(",")[0]); };
+      go.onclick = () => { setLoc({ lat: s.lat, lon: s.lon, place: s.name }); renderRoute(); toast("Sailing to " + s.name.split(",")[0]); };
       const del = document.createElement("button");
       del.className = "del";
       del.setAttribute("aria-label", "Remove stop");
@@ -3493,7 +3518,7 @@
         const full = document.createElement("button");
         full.className = "mini";
         full.textContent = "Full hourly sky";
-        full.onclick = () => { state.loc = { lat: s.lat, lon: s.lon, place: s.name }; persist(); refreshData(); closeSheet(); renderHours(); updateSat(); openSheet("hours"); };
+        full.onclick = () => { setLoc({ lat: s.lat, lon: s.lon, place: s.name }); closeSheet(); renderHours(); updateSat(); openSheet("hours"); };
         rl.appendChild(lab); rl.appendChild(full);
         ex.appendChild(rl);
         wrap.appendChild(ex);
@@ -3573,7 +3598,16 @@
       if (!navigator.geolocation) { toast("Location not available here"); return; }
       toast("Finding your location");
       navigator.geolocation.getCurrentPosition(
-        p => { state.loc = { lat: +p.coords.latitude.toFixed(4), lon: +p.coords.longitude.toFixed(4), place: "Your location" }; persist(); refreshData(); el("about-loc").textContent = state.loc.place; toast("Location set"); },
+        async p => {
+          const lat = +p.coords.latitude.toFixed(4), lon = +p.coords.longitude.toFixed(4);
+          let place = "Your location";
+          try {
+            const g = await (await fetch("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=" + lat + "&longitude=" + lon + "&localityLanguage=en")).json();
+            const town = String(g.locality || g.city || "").replace(/^(Town|Village|City) of /, "").replace(/[<>&]/g, "");
+            if (town) place = town + (g.principalSubdivision ? ", " + g.principalSubdivision : "");
+          } catch (e) {}
+          setLoc({ lat: lat, lon: lon, place: place }); el("about-loc").textContent = place; toast("Set to " + place);
+        },
         () => toast("Location permission denied"),
         { timeout: 9000, maximumAge: 600000 }
       );
@@ -3583,7 +3617,7 @@
       toast("Searching");
       const g = await geocode(q);
       if (!g) { toast("Place not found"); return; }
-      state.loc = g; persist(); refreshData(); el("about-loc").textContent = g.place; el("city-input").value = ""; toast("Set to " + g.place);
+      setLoc(g); el("about-loc").textContent = g.place; el("city-input").value = ""; toast("Set to " + g.place);
     };
     el("city-input").addEventListener("keydown", e => { if (e.key === "Enter") el("city-go").click(); });
     document.querySelectorAll("#extras-seg button").forEach(b => b.onclick = () => {
@@ -3673,8 +3707,6 @@
     el("coach-skip").onclick = closeTour;
     window.addEventListener("resize", () => { if (!el("coach").hidden) positionCoach(TOUR[tourIdx]); });
     el("open-compass").onclick = openCompass;
-    window.addEventListener("deviceorientationabsolute", onHeading);
-    window.addEventListener("deviceorientation", onHeading);
     document.querySelectorAll("#compass-mode button").forEach(b => b.onclick = () => {
       starMode = b.dataset.v === "star";
       document.body.classList.toggle("starfield", starMode);
@@ -3820,13 +3852,18 @@
 
   function init() {
     resize();
-    const queueResize = () => { clearTimeout(window.__rt); window.__rt = setTimeout(resize, 180); };
+    const queueResize = () => {
+      const typing = document.activeElement && document.activeElement.matches("input, textarea");
+      if (typing && window.innerWidth === W) return;   // keyboard opened/closed: keep the scene as is
+      clearTimeout(window.__rt); window.__rt = setTimeout(resize, 180);
+    };
     window.addEventListener("resize", queueResize);
     // WKWebView can hand out pre-layout bounds at launch and never fire a resize after
     // settling — the scene then renders squeezed into a corner. visualViewport catches
     // most of it; the slow interval is the backstop that heals any missed size change.
     if (window.visualViewport) window.visualViewport.addEventListener("resize", queueResize);
     setInterval(() => {
+      document.body.classList.toggle("night", isNight());   // keeps up with the fast "whole day" sky too
       if (cv.width !== Math.round(window.innerWidth * Math.min(window.devicePixelRatio || 1, 2))) queueResize();
     }, 2000);
     buildThemeChips();

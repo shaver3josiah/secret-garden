@@ -1,4 +1,4 @@
-const CACHE = "secret-garden-v33";
+const CACHE = "secret-garden-v34";
 // unversioned on purpose: the radar/tile history must SURVIVE app updates — the old
 // CACHE+"-data" name was wiped by every version bump, killing offline radar each release
 const DATA = "secret-garden-data";
@@ -60,6 +60,7 @@ self.addEventListener("fetch", (e) => {
   }
   e.respondWith(
     fetch(e.request).then((res) => {
+      if (!res.ok && res.type !== "opaque") return res;   // never let a 429/500 replace the last good copy
       const copy = res.clone();
       caches.open(DATA).then((c) => c.put(e.request, copy).then(() => trimData(c))).catch(() => {});
       return res;

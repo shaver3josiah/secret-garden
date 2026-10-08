@@ -304,7 +304,9 @@ a.chip-info.tap:hover { border-color: var(--line-warm); background: rgba(255, 25
   transition: transform 0.5s var(--ease);
   touch-action: manipulation;   /* scroll + pinch-to-zoom the data; no double-tap zoom */
 }
-.sheet.open { transform: translate(-50%, 0); }
+.sheet.open { transform: translate(-50%, 0); visibility: visible; transition: transform 0.5s var(--ease), visibility 0s; }
+/* closed sheets leave the focus + TalkBack order (they only slid off-screen); hide after the slide */
+.sheet:not(.open) { visibility: hidden; transition: transform 0.5s var(--ease), visibility 0s linear 0.5s; }
 
 .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .sheet-head h2 { font-family: var(--font-heading); font-weight: 600; font-size: 1.5rem; color: var(--ink); }
@@ -583,6 +585,14 @@ p.about.credit a { color: var(--gold-ink); text-decoration: none; }
 #sheet-daily .day-range { grid-template-columns: 2.8em 1fr 2.8em; }
 #sheet-daily .day-range i { font-size: 1.22rem; }
 #sheet-daily .day-caret svg { width: 18px; height: 18px; }
+/* narrow phones: the fixed columns left the range bar no room, pushing the high + caret off-screen */
+@media (max-width: 400px) {
+  #sheet-daily .day-row { grid-template-columns: 3.5rem 1.9rem 3.4rem minmax(0, 1fr) 14px; gap: 5px; }
+  #sheet-daily .day-name b { font-size: 1.15rem; }
+  #sheet-daily .day-glyph { font-size: 1.45rem; }
+  #sheet-daily .day-range { grid-template-columns: 2em minmax(12px, 1fr) 2em; gap: 5px; }
+  #sheet-daily .day-range i { font-size: 1.1rem; }
+}
 #sheet-daily .dd-k { font-size: 0.92rem; }
 #sheet-daily .dd-v { font-size: 1.34rem; }
 #sheet-daily .dd-v small { font-size: 1.1rem; }
@@ -1212,3 +1222,18 @@ body.starfield #const-note { color: var(--honey-light); }
 #scene, .stage, .drawer, .placebar { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 
 
+
+/* sailing adds the Routes chip to the dock; on one line it pushed Compass and Settings
+   off-screen, so Routes takes its own full-width row above the icon buttons */
+.drawer .dock-tools { flex-wrap: wrap; justify-content: flex-end; min-width: 0; max-width: 100%; row-gap: 10px; }
+.drawer .dock-tools .route-btn { order: -1; flex: 1 0 100%; justify-content: center; }
+
+/* small route/verse controls: 44px touch targets (were 18-30px and easy to miss) */
+.stop-row .del, .cv-row .del { width: 44px; height: 44px; }
+.mv { width: 44px; height: 32px; font-size: 0.9rem; }
+
+/* night: the dark-ink title and chips sank into the night sky (~2.6:1); light title, firmer chips */
+.night .brand h1 { color: #f4efe2; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.45); }
+.night .brand .em { color: #d3e6bd; }
+.night .brand small { color: rgba(244, 239, 226, 0.85); }
+.night .chip-info, .night .hb-chip { background: rgba(255, 255, 255, 0.8); }

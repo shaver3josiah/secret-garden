@@ -65,10 +65,9 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl(START_URL)
 
         onBackPressedDispatcher.addCallback(this) {
-            if (webView.canGoBack()) {
-                webView.goBack()
-            } else {
-                finish()
+            // the web app closes its own sheets/tour first; only exit when nothing was open
+            webView.evaluateJavascript("(window.sgBack && window.sgBack()) === true") { handled ->
+                if (handled != "true") finish()
             }
         }
     }
